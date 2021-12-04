@@ -1,0 +1,471 @@
+            TITLE 'Loader MP/M II for RC2014'
+            .Z180
+;******************************************************************************
+;******************************************************************************
+;**                                                                          **
+;**                        M P / M  I I   L o a d e r                        **
+;**                             by Tadeusz Pycio                             **
+;**                                                                          **
+;******************************************************************************
+;******************************************************************************
+;  Build:   ZSM LDRBIOS,LDRBIOS=LDRBIOS.Z80                       
+;           LINK LDRBIOS.BIN=LDRBIOS[NR,L1700]                    
+;                                                                 
+;  Revision History:                                              
+;  Rev    Date         Author                Comments             
+;  1.00   29-09-2021   Tadeusz Pycio         Created              
+;                                                                 
+;******************************************************************************
+
+BASE_IO      equ   0C0h             ;Z180 internal register base address
+
+CNTLA0       equ   BASE_IO + 00h    ;ASCI Channel Control Register A chan 0
+CNTLA1       equ   BASE_IO + 01h    ;ASCI Channel Control Register A chan 1
+CNTLB0       equ   BASE_IO + 02h    ;ASCI Channel Control Register B chan 0
+CNTLB1       equ   BASE_IO + 03h    ;ASCI Channel Control Register B chan 1
+STAT0        equ   BASE_IO + 04h    ;ASCI Status Register channel 0
+STAT1        equ   BASE_IO + 05h    ;ASCI Status Register channel 1
+TDR0         equ   BASE_IO + 06h    ;ASCI Transmit Data Register channel 0
+TDR1         equ   BASE_IO + 07h    ;ASCI Transmit Data Register channel 1
+RDR0         equ   BASE_IO + 08h    ;ASCI Receive Register channel 0
+RDR1         equ   BASE_IO + 09h    ;ASCI Receive Register channel 1
+ASCI0        equ   BASE_IO + 12h    ;ASCI Extension Control Register 0
+ASCI1        equ   BASE_IO + 13h    ;ASCI Extension Control Register 1
+ASTC0L       equ   BASE_IO + 1Ah    ;ASCI Time Constant Register ch 0 Low
+ASTC0H       equ   BASE_IO + 1Bh    ;ASCI Time Constant Register ch 0 High
+ASTC1L       equ   BASE_IO + 1Ch    ;ASCI Time Constant Register ch 1 Low
+ASTC1H       equ   BASE_IO + 1Dh    ;ASCI Time Constant Register ch 1 High
+CMR          equ   BASE_IO + 1Eh    ;Clock Multiplier Register
+CCR          equ   BASE_IO + 1Fh    ;CPU Control Register
+DCNTL        equ   BASE_IO + 32h    ;DMA/WAIT Control Register
+IL           equ   BASE_IO + 33h    ;Interrupt Vector Register
+ITC          equ   BASE_IO + 34h    ;INT/TRAP Control Register
+CBR          equ   BASE_IO + 38h    ;MMU Control Base Register
+BBR          equ   BASE_IO + 39h    ;MMU Bank Base Register
+CBAR         equ   BASE_IO + 3Ah    ;MMU Common/Bank Register
+OMCR         equ   BASE_IO + 3Eh    ;Operation Mode Control Register
+ICR          equ   BASE_IO + 3Fh    ;I/O Control Register
+
+; Serial status register bits
+
+ST_RDRF      equ   7                ;Receive data register Full
+ST_TDRE      equ   1                ;Transmit data register empty
+
+; *****************************************************************************
+
+userdrv      equ   0h               ; Current user number and drive.
+
+blksiz       equ   4096             ;CP/M allocation size
+hstsiz       equ   512              ;host disk sector size
+hstspt       equ   32               ;host disk sectors/trk
+hstblk       equ   hstsiz/128       ;CP/M sects/host buff
+cpmspt       equ   hstblk * hstspt  ;CP/M sectors/track
+secmsk       equ   hstblk-1         ;sector mask
+
+
+wrall        equ   0                ;write to allocated
+wrdir        equ   1                ;write to directory
+wrual        equ   2                ;write to unallocated
+
+; -----------------------------------------------------------------------------
+; CF registers
+CF_DATA      equ   10h
+CF_FEATURES  equ   11h
+CF_ERROR     equ   11h
+CF_SECCOUNT  equ   12h
+CF_SECTOR    equ   13h
+CF_CYL_LOW   equ   14h
+CF_CYL_HI    equ   15h
+CF_HEAD      equ   16h
+CF_STATUS    equ   17h
+CF_COMMAND   equ   17h
+CF_LBA0      equ   13h
+CF_LBA1      equ   14h
+CF_LBA2      equ   15h
+CF_LBA3      equ   16h
+
+;CF Features
+CF_8BIT      equ   1
+CF_NOCACHE   equ   082h
+;CF Commands
+CF_READ_SEC  equ   020h
+CF_WRITE_SEC equ   030h
+CF_SET_FEAT  equ   0EFh
+
+; -----------------------------------------------------------------------------
+LF           equ   0Ah              ; Line Feed
+CR           equ   0Dh              ; Carriage Return
+
+; -----------------------------------------------------------------------------
+;            aseg
+;            org   0100h
+;           .phase 1700h
+            CSEG
+                                    ; + is implemented
+            jp    boot              ;   cold start
+            jp    wboot             ;   warm start (reboot)
+            jp    const             ; + console status
+            jp    conin             ;   console input
+            jp    conout            ; + console output
+            jp    list              ;   list character out
+            jp    punch             ;   punch character out
+            jp    reader            ;   read character in
+            jp    home              ; + move disk head to home
+            jp    seldsk            ; + select disk drive
+            jp    settrk            ; + set track number
+            jp    setsec            ; + set sector number
+            jp    setdma            ; + set disk memory read/write address
+            jp    read              ; + read sector
+            jp    write             ;   write sector
+            jp    listst            ;   list dev status test
+            jp    sectrn            ; + sector translate
+;==============================================================================
+; Disk parameter headers for disk 0
+;==============================================================================
+
+dpbase:     dw    0000h,0000h,0000h,0000h,dirbuf,dpb0,0000h,alv00
+
+dpb0:       dw    128               ;SPT - sectors per track
+            db    5                 ;BSH - block shift factor
+            db    31                ;BLM - block mask
+            db    1                 ;EXM - Extent mask
+            dw    2043              ; (2047-4) DSM - Storage size (blocks - 1)
+            dw    511               ;DRM - Number of directory entries - 1
+            db    240               ;AL0 - 1 bit set per directory block
+            db    0                 ;AL1 -            "
+            dw    0                 ;CKS - DIR check vector size (DRM+1)/4 (0=fixed disk)
+            dw    1                 ;OFF - Reserved tracks
+
+; -----------------------------------------------------------------------------
+
+boot:
+wboot:
+conin:
+list:
+punch:
+reader:
+write:
+listst:
+            ret                     ; done
+
+; -----------------------------------------------------------------------------
+; console in/out routines
+;
+const:      in0   a,(STAT0)         ;Read serial port status register
+            bit   ST_RDRF,a         ;Receive register full?
+            jr    z,constNone       ;Skip if no character available
+            ld    a,0FFh            ;Character is available
+            ret 
+constNone:  ld    a,0               ;Character not available
+            ret	    
+
+; -----------------------------------------------------------------------------
+conout:     in0   a,(STAT0)         ;Read serial port status register
+            bit   ST_TDRE,a         ;Transmit register empty?
+            jr    z,conout          ;No, so keep waiting
+            out0  (TDR0), c         ;Write byte to serial port
+            ret
+
+;==============================================================================
+; Disk processing entry points
+;==============================================================================
+
+seldsk:     ld    hl,0000h          ; Select drive (C): DPH ptr. in HL
+            ld    a,c
+            cp    16                ; 16 for 128MB disk
+            jr    c,chgdsk          ; if invalid drive will give BDOS error
+            ld    a,(userdrv)       ; so set the drive back to a:
+            cp    c                 ; If the default disk is not the same as the
+            ret   nz                ; selected drive then return, 
+            xor   a                 ; else reset default back to a:
+            ld    (userdrv),a       ; otherwise will be stuck in a loop
+            ld    (sekdsk),a
+            ret
+; -----------------------------------------------------------------------------
+chgdsk:     ld    (sekdsk),a
+            rlc   a                 ;*2
+            rlc   a                 ;*4
+            rlc   a                 ;*8
+            rlc   a                 ;*16
+            ld    hl,dpbase
+            ld    b,0
+            ld    c,a
+            add   hl,bc
+            ret
+;------------------------------------------------------------------------------
+home:       ld    a,(hstwrt)        ;check for pending write
+            or    a
+            jr    nz,homed
+            ld    (hstact),a        ;clear host active flag
+homed:      ld    bc,0000h
+;------------------------------------------------------------------------------
+settrk:     ld    (sektrk),bc       ; Set track passed from BDOS in register BC.
+            ret
+
+;------------------------------------------------------------------------------
+setsec:     ld    (seksec),bc       ; Set sector passed from BDOS in register BC.
+            ret
+
+;------------------------------------------------------------------------------
+setdma:     ld    (dmaadr),bc       ; Set DMA ADDress given by registers BC.
+            ret
+;------------------------------------------------------------------------------
+sectrn:     push  bc
+            pop   hl
+            ret
+;------------------------------------------------------------------------------
+            ;read the selected CP/M sector
+read:       xor   a
+            ld    (unacnt),a
+            ld    a,1
+            ld    (readop),a        ;read operation
+            ld    (rsflag),a        ;must read data
+            ld    a,wrual
+            ld    (wrtype),a        ;treat as unalloc
+            jp    rwoper            ;to perform the read
+
+;------------------------------------------------------------------------------
+;  (To simplify !)
+rwoper:
+            ;enter here to perform the read/write
+            xor   a                 ;zero to accum
+            ld    (erflag),a        ;no errors (yet)
+            ld    a,(seksec)        ;compute host sector
+            or    a                 ;carry = 0
+            rra                     ;shift right
+            or    a                 ;carry = 0
+            rra                     ;shift right
+            ld    (sekhst),a        ;host sector to seek
+;
+;                             active host sector?
+            ld    hl,hstact         ;host active flag
+            ld    a,(hl)
+            ld    (hl),1            ;always becomes 1
+            or    a                 ;was it already?
+            jr    z,filhst          ; fill host if not
+;
+;                             host buffer active, same as seek buffer?
+            ld    a,(sekdsk)
+            ld    hl,hstdsk         ;same disk?
+            cp    (hl)              ;sekdsk = hstdsk?
+            jr    nz,nomatch
+;
+;                             same disk, same track?
+            ld    hl,hsttrk
+            call  sektrkcmp         ;sektrk = hsttrk?
+            jr    nz,nomatch
+;
+;                             same disk, same track, same buffer?
+            ld    a,(sekhst)
+            ld    hl,hstsec         ;sekhst = hstsec?
+            cp    (hl)
+            jr    z,match           ;skip if match
+            ;     proper disk, but not correct sector
+nomatch:    ld    a,(hstwrt)        ;host written?
+            or    a
+            call  nz,writehst       ;clear host buff
+            ;     may have to fill the host buffer
+filhst:     ld    a,(sekdsk)
+            ld    (hstdsk),a
+            ld    hl,(sektrk)
+            ld    (hsttrk),hl
+            ld    a,(sekhst)
+            ld    (hstsec),a
+            ld    a,(rsflag)        ;need to read?
+            or    a
+            call  nz,readhst        ;yes, if 1
+            xor   a                 ;0 to accum
+            ld    (hstwrt),a        ;no pending write
+            ;     copy data to or from buffer
+match:      ld    a,(seksec)        ;mask buffer number
+            and   secmsk            ;least signif bits
+            ld    h,a
+            ld    l,128
+            mlt   hl
+;                               hl has relative host buffer address
+            ld    de,hstbuf
+            add   hl,de             ;hl = host address
+            ld    de,(dmaadr)       ;get/put MP/M data
+            ld    bc, 128           ;length of move
+            ld    a,(readop)        ;which way?
+            or    a
+            jr    nz,rwmove         ;skip if read
+;
+;           write operation, mark and switch direction
+            ld    a,1
+            ld    (hstwrt),a        ;hstwrt = 1
+            ex    de,hl             ;source/dest swap
+;
+;     BC initially 128, HL is source, DE is dest
+rwmove:     ldir
+;
+;                               data has been moved to/from host buffer
+            ld    a,(wrtype)        ;write type
+            cp    wrdir             ;to directory?
+            ld    a,(erflag)        ;in case of errors
+            ret   nz                ;no further processing
+;
+;                               clear host buffer for directory write
+            or    a                 ;errors?
+            ret   nz                ;skip if so
+            xor   a                 ;0 to accum
+            ld    (hstwrt),a        ;buffer written
+            call  writehst
+            ld    a,(erflag)
+            ret
+;------------------------------------------------------------------------------
+;Utility subroutine for 16-bit compare
+
+            ;HL = .unatrk or .hsttrk, compare with sektrk
+sektrkcmp:  ex    de,hl
+            ld    hl,sektrk
+            ld    a,(de)            ;low byte compare
+            cp    (hl)              ;same?
+            ret   nz                ;return if not
+;                                   low bytes equal, test high 1s
+            inc   de
+            inc   hl
+            ld    a,(de)
+            cp    (hl)              ;sets flags
+            ret
+
+;==============================================================================
+; Convert track/head/sector into LBA for physical access to the disk
+; 00Vvvvvv|vvTttttt|tttsssss   some serious bitshifting ahead
+; code by Rienk H. Koolstra
+;==============================================================================
+SetLBAadr:  ld    hl,(hsttrk)       ; 0000000T tttttttt
+            ld    a,l               ; tttttttt
+            and   07h               ; 00000ttt
+            rrca                    ; t00000tt
+            rrca                    ; tt00000t
+            rrca                    ; ttt00000
+            ld    b,a
+            ld    a,(hstsec)        ; 000sssss
+            or    b                 ; tttsssss
+            ld    (lba0),a
+
+            ld    a,l               ; tttttttt
+            and   0F8h              ; ttttt000
+            or    h                 ; ttttt00T
+            rrca                    ; Tttttt00
+            rrca                    ; 0Tttttt0
+            rrca                    ; 00Tttttt
+            ld    b,a
+            ld    a,(hstdsk)        ; Vvvvvvvv (V is used for the 128+ diskset)
+            rrca                    ; vVvvvvvv
+            rrca                    ; vvVvvvvv
+            ld    c,a
+            and   0C0h              ; vv000000
+            or    b                 ; vvTttttt
+            ld    (lba1),a
+
+            ld    a,c               ; vvVvvvvv
+            and   3Fh               ; 00Vvvvvv
+            ld    (lba2),a
+
+; LBA Mode using drive 0 = E0
+            ld    a,0E0H
+            ld    (lba3),a
+            ld    a,(lba0)
+            out   (CF_LBA0),a
+            ld    a,(lba1)
+            out   (CF_LBA1),a
+            ld    a,(lba2)
+            out   (CF_LBA2),a
+            ld    a,(lba3)
+            out   (CF_LBA3),a
+            ld    a,1
+            out   (CF_SECCOUNT),a
+
+            ret    
+
+;==============================================================================
+; Read physical sector from host
+;==============================================================================
+
+readhst:    push  af
+            push  bc
+            push  hl
+
+            call  cfWait
+            call  setLBAadr
+
+            ld    a,CF_READ_SEC
+            out   (CF_COMMAND),a
+
+            call  cfWait
+            ld    hl,hstbuf
+            ld    b,0
+            ld    c,CF_DATA
+            inir                    ; input 256 bytes
+            inir                    ; and another 256
+
+            pop   hl
+            pop   bc
+            pop   af
+
+            xor   a
+            ld    (erflag),a
+            ret
+
+;==============================================================================
+; Write physical sector to host
+;==============================================================================
+
+writehst:   ret
+
+;==============================================================================
+; Wait for disk to be ready (busy=0,ready=1)
+;==============================================================================
+
+cfWait:     push  af
+TstBusy:    in    a,(CF_STATUS)     ;Read status register
+            bit   7,a               ;Test Busy flag
+            jr    nz,TstBusy        ;High so busy
+TstReady:   in    a,(CF_STATUS)     ;Read status register
+            bit   6,a               ;Test Ready flag
+            jr    Z,TstBusy         ;Low so not ready
+            pop   af
+            ret  
+
+; begin scratch area for bdos
+;dirbf:	ds	128		; directory work space
+;all00:	ds	((dsm06+1)/8)+1
+;chk00:	ds	cks
+;altbuf:	ds	asecsiz+1
+
+dirbuf:     ds    128               ;scratch directory area
+alv00:      ds    257               ;allocation vector 0
+
+lba0:       db    00h
+lba1:       db    00h
+lba2:       db    00h
+lba3:       db    00h
+
+sekdsk:     ds    1                 ;seek disk number
+sektrk:     ds    2                 ;seek track number
+seksec:     ds    2                 ;seek sector number
+;
+hstdsk:     ds    1                 ;host disk number
+hsttrk:     ds    2                 ;host track number
+hstsec:     ds    1                 ;host sector number
+;
+sekhst:     ds    1                 ;seek shr secshf
+hstact:     ds    1                 ;host active flag
+hstwrt:     ds    1                 ;host written flag
+;
+unacnt:     ds    1                 ;unalloc rec cnt
+
+erflag:     ds    1                 ;error reporting
+rsflag:     ds    1                 ;read sector flag
+readop:     ds    1                 ;1 if read operation
+wrtype:     ds    1                 ;write operation type
+dmaadr:     ds    2                 ;last dma address
+hstbuf:     ds    512               ;host buffer
+
+biosend     equ   $
+
+;           .dephase
+
+            END

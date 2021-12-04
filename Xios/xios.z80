@@ -1,0 +1,978 @@
+            TITLE  'MP/M-II Banked XIOS for RC2014'
+            ; Get processor, chip and general equates
+            .z180
+            include z180hwr.inc
+
+;******************************************************************************
+;******************************************************************************
+;**                                                                          **
+;**                  M P / M  I I   B a n k e d   X I O S                    **
+;**                            by Tadeusz Pycio                              **
+;**                                                                          **
+;******************************************************************************
+;******************************************************************************
+;  Build:   ZSM XIOS,XIOS=XIOS.Z80                                
+;           LINK BNKXIOS=XIOS[NR,OS]                              
+;
+;  Program uses snippets of code written by Hector Peraza, Rienk H. Koolstra, 
+;  and Digital Research.
+;
+;  Revision History:                                              
+;  Rev    Date         Author                Comments             
+;  0.2    23-09-2021   Tadeusz Pycio         Created 
+;  1.0    04-12-2021   Tadeusz Pyvio         Public release              
+;                                                                 
+;******************************************************************************
+
+false       equ   0
+true        equ   -1
+
+debug       equ   false
+
+tpabuf      equ   80h               ; Default I/O buffer and command line storage
+
+; Ascii Character Equates
+LF          equ   0Ah         ; Line Feed
+CR          equ   0Dh         ; Carriage Return
+
+
+            cseg
+
+; Jump vectors for individual subroutines
+
+XIOS:       jp    commonbase        ; CommonBase, Terminate process
+wboot:      jp    warmstart         ; Warm Boot, Terminate process
+            jp    const             ; Check for console char ready
+            jp    conin             ; Read console character in
+            jp    conout            ; Write console character out
+            jp    list              ; Write list character out
+            jp    rtnempty          ; not used by MP/M II
+            jp    rtnempty          ; not used by MP/M II
+            jp    home              ; Move to track 00
+            jp    seldsk            ; Select disk drive
+            jp    settrk            ; Set track number
+            jp    setsec            ; Set sector number
+            jp    setDMA            ; Set DMA address
+            jp    read              ; Read selected sector
+            jp    write             ; Write selected sector
+            jp    rtnempty          ; not used by MP/M II
+            jp    sectran           ; Sector translate subroutine
+
+            jp    selmemory         ; Select memory
+            jp    polldevice        ; Poll device
+            jp    startclock        ; Start clock
+            jp    stopclock         ; Stop clock
+            jp    exitregion        ; Exit critical region
+            jp    maxconsole        ; Maximum console number
+            jp    systeminit        ; System initialization
+            db    0,0,0             ; force use of internal dispatch @ idle
+;           jp    idle
+
+; -----------------------------------------------------------------------------
+commonbase: jp    coldstart
+swtuser:    jp    $-$
+swtsys:     jp    $-$
+pdisp:      jp    $-$
+xdos:       jp    $-$
+sysdat:     dw    $-$
+; -----------------------------------------------------------------------------
+; Padding string, exactly 4 bytes long, to make sure that the interrupt
+; table begins on an 32-byte boundary
+
+            db    "Z180"
+
+; Z180 interrupt table, must begin in a 32-byte boundary
+
+itbl:       dw    badint            ;External INT-1 pin
+            dw    badint            ;External INT-2 pin
+            dw    timerint          ;Timer 0
+            dw    badint            ;Timer 1
+            dw    badint            ;DMA Ch-0
+            dw    badint            ;DMA Ch-1
+            dw    badint            ;Clocked serial I/O
+            dw    badint            ;Asynch. comms. Ch-0
+            dw    badint            ;Asynch. comms. Ch-1
+; -----------------------------------------------------------------------------
+coldstart:
+warmstart:  ld    c,0
+            jp    xdos              ; system reset, terminate process
+
+;==============================================================================
+;	D I S K   O R G A N I S A T I O N   T A B L E S
+;==============================================================================
+
+blksiz      equ   4096              ;MP/M allocation size
+hstsiz      equ   512               ;host disk sector size
+hstspt      equ   32                ;host disk sectors/trk
+hstblk      equ   hstsiz/128        ;MP/M sects/host buff
+cpmspt      equ   hstblk * hstspt   ;MP/M sectors/track
+secmsk      equ   hstblk-1          ;sector mask
+
+wrall       equ   0                 ; write to allocated
+wrdir       equ   1                 ; write to directory
+wrual       equ   2                 ; write to unallocated
+
+;==============================================================================
+; Disk parameter headers for disk 0 to 15
+;==============================================================================
+
+dpbase:     dw    0000h,0000h,0000h,0000h,dirbuf,dpb0,0000h,alv00
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv01
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv02
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv03
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv04
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv05
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv06
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv07
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv08
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv09
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv10
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv11
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv12
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv13
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv14
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpbLast,0000h,alv15
+            
+; First drive has a reserved track for MP/M
+
+dpb0:       dw    128               ;SPT - sectors per track
+            db    5                 ;BSH - block shift factor
+            db    31                ;BLM - block mask
+            db    1                 ;EXM - Extent mask
+            dw    2043              ; (2047-4) DSM - Storage size (blocks - 1)
+            dw    511               ;DRM - Number of directory entries - 1
+            db    240               ;AL0 - 1 bit set per directory block
+            db    0                 ;AL1 -            "
+            dw    0                 ;CKS - DIR check vector size (DRM+1)/4 (0=fixed disk)
+            dw    1                 ;OFF - Reserved tracks
+
+dpb:        dw    128               ;SPT - sectors per track
+            db    5                 ;BSH - block shift factor
+            db    31                ;BLM - block mask
+            db    1                 ;EXM - Extent mask
+            dw    2047              ;DSM - Storage size (blocks - 1)
+            dw    511               ;DRM - Number of directory entries - 1
+            db    240               ;AL0 - 1 bit set per directory block
+            db    0                 ;AL1 -            "
+            dw    0                 ;CKS - DIR check vector size (DRM+1)/4 (0=fixed disk)
+            dw    0                 ;OFF - Reserved tracks
+
+; Last drive is smaller because CF is never full 128MB
+
+dpbLast:    dw    128               ;SPT - sectors per track
+            db    5                 ;BSH - block shift factor
+            db    31                ;BLM - block mask
+            db    1                 ;EXM - Extent mask
+            dw    511               ;DSM - Storage size (blocks - 1)  ; 511 = 2MB (for 128MB card)
+            dw    511               ;DRM - Number of directory entries - 1
+            db    240               ;AL0 - 1 bit set per directory block
+            db    0                 ;AL1 -            "
+            dw    0                 ;CKS - DIR check vector size (DRM+1)/4 (0=fixed disk)
+            dw    0                 ;OFF - Reserved tracks
+
+; -----------------------------------------------------------------------------
+; Output ASCI on console 0
+
+PutMsg:     ld    a,(hl)            ; Affects A, BC, HL
+            and   a
+            ret   z                 ; Zero terminates
+            ld    c,a
+            ld    d,0               ; console 0
+            push  hl
+            call  conout            ; Display 1 char.
+            pop   hl
+            inc   hl
+            jr    PutMsg
+
+; -----------------------------------------------------------------------------
+;	I / O   H A N D L E R S 
+
+numcns      equ   2                 ; number of consoles
+
+poll        equ   131               ; XDOS poll function
+makeque     equ   134               ; XDOS make queue
+readque     equ   137               ; XDOS read queue
+writeque    equ   139               ; XDOS write queue
+xdelay      equ   141               ; XDOS delay
+create      equ   144               ; XDOS create process
+flagwait    equ   132
+flagset     equ   133
+dsptch      equ   142
+
+
+pldsk       equ   0                 ; poll CF 
+plci0       equ   1                 ; poll console #0 input
+plco0       equ   2                 ; poll console #0 output
+plci1       equ   3                 ; poll console #1 input
+plco1       equ   4                 ; poll console #1 output
+
+            ; Console status
+const:      call  ptbljmp           ; compute and jump to hndlr
+            dw    pt0st             ; console #0 status routine
+            dw    pt1st             ; console #1 status routine
+
+            ; Read console character in
+conin:      call  ptbljmp           ; compute and jump to hndlr
+            dw    pt0in             ; console #0 input
+            dw    pt1in             ; console #1 input
+
+            ; Write console character out
+conout:     call  ptbljmp           ; compute and jump to hndlr
+            dw    pt0out            ; console #0 output
+            dw    pt1out            ; console #1 output
+
+ptbljmp:    ld    a,d               ; compute and jump to handler,
+            cp    numcns            ; d = console #, preserve it
+            jr    c,tbljmp
+;           pop	af		; throw away table address (??)
+rtnempty:   xor   a
+            ret
+tbljmp:     add   a,a
+            pop   hl
+            ld    e,a
+            ld    d,0
+            add   hl,de
+            ld    e,(hl)
+            inc   hl
+            ld    d,(hl)
+            ex    de,hl
+            jp    (hl)              ; jump to computed cns handler
+
+; -----------------------------------------------------------------------------
+;	C O N S O L E   0
+
+polci0:
+pt0st:      in0   a,(STAT0)         ; Console status
+            and   80h               ; Receive register (ST_RDRF) full?
+            ret   z
+            ld    a,0FFh
+            ret
+
+pt0in:      ld    c,poll
+            ld    e,plci0
+            call  xdos              ; poll console #0 input
+            in0   a,(RDR0)
+            and   7Fh
+            ret
+
+pt0out:     in0   a,(STAT0)         ; console output
+            bit   ST_TDRE,a         ; tx ready?
+            jr    nz,tx0rdy
+            push  bc
+            ld    c,poll
+            ld    e,plco0
+            call  xdos              ; poll console #0 output
+            pop   bc
+tx0rdy:     ld    a,c
+            out0  (TDR0),a          ; send it
+            ret
+
+polco0:     in0   a,(STAT0)         ; Read UART status register of COM port 0.
+            and   02h               ; tx (ST_TDRE) ready?
+            ret   z
+            ld    a,0FFh
+            ret
+; -----------------------------------------------------------------------------
+;	C O N S O L E   1
+
+polci1:
+pt1st:      in0   a,(STAT1)         ; Console status
+            and   80h               ; Receive register (ST_RDRF) full?
+            ret   z                 ; 00 - not ready
+            ld    a,0FFh            ; FF - ready
+            ret
+
+pt1in:      ld    c,poll
+            ld    e,plci1
+            call  xdos              ; poll console #1 input
+            in0   a,(RDR1)
+            and   7Fh
+            ret
+
+pt1out:     in0   a,(STAT1)         ; console output
+            bit   ST_TDRE,a         ; Test TX Data Register Empty ready bit and
+            jr    nz,tx1rdy
+            push  bc
+            ld    c,poll
+            ld    e,plco1
+            call  xdos              ; poll console #1 output
+            pop   bc
+tx1rdy:     ld    a,c
+            out0  (TDR1),a          ; send it
+            ret
+
+polco1:     in0   a,(STAT1)         ; Read UART status register of COM port 1.
+            and   02h               ; tx (ST_TDRE) ready?
+            ret   z
+            ld    a,0FFh
+            ret
+
+; -----------------------------------------------------------------------------
+;	L I S T   D E V I C E
+
+; List Device Status
+;pollpt:
+listst:     in0   a,(SPORT)         ; Get status
+            rlca                    ; A[7] (ready) -> CY
+            sbc   a,a               ; A = -1 if CY set
+            ret                     ; Returns A, & NZ if ready
+
+; Output C on Printer
+list:
+lptout:     call  listst            ; Busy?
+            jr    nz,lptrdy         ; Go if ready
+;            push  bc
+;            ld    c,poll
+;            ld    e,pllpt
+;            call  xdos
+;            pop   bc
+lptrdy:
+            out0  (DPORT),c         ; Latch data
+            ld    a,0Dh
+            out0  (CPORT),a         ; STB = 1
+            nop
+            nop                     ; Pause
+            ld    a,0Ch
+            out0  (CPORT),a         ; STB = 0
+            ret
+
+; -----------------------------------------------------------------------------
+; Maximum Console Number
+maxconsole: ld    a,numcns
+            ret
+
+; -----------------------------------------------------------------------------
+; Reg C = device # to be polled
+;	 return 0ffh if ready, 000h if not
+polldevice: ld    a,c
+            cp    numdev
+            jr    c,devok
+            ld    a,numdev
+
+devok:      call  tbljmp            ; jump to dev poll code
+
+devtbl:     dw    poldsk
+            dw    polci0
+            dw    polco0
+            dw    polci1
+            dw    polco1
+numdev      equ   ($-devtbl)/2
+            dw    rtnempty
+
+; -----------------------------------------------------------------------------
+; -----------------------------------------------------------------------------
+; Poll CF Disk
+poldsk:     in    a,(CF_STATUS)     ;Read status register 
+            and   80h               ; A[7] (Busy)
+            xor   80h
+            ret   z
+            ld    a,0FFh
+            ret
+
+; -----------------------------------------------------------------------------
+;       B A N K   S W I T C H I N G
+;    adr of mem descriptor = BC ----> base   1 byte,
+selmemory:  inc   bc                ; size   1 byte,
+            inc   bc                ; attrib 1 byte,
+            inc   bc                ; bank   1 byte.
+            ld    a,(bc)
+selbank:    and   7                 ; bank number
+            or    8                 ; + base adrr (80h)>>4
+            rla 
+            rla
+            rla
+            rla
+            out0  (bbr),a
+            ret
+
+; -----------------------------------------------------------------------------
+startclock: ld    a,0FFh            ; will cause flag #1 to be set
+            ld    (tickn),a         ; at each system time unit tick
+            ret
+
+stopclock:  xor   a                 ; will stop flag #1 setting at
+            ld    (tickn),a         ; system time unit tick
+            ret
+
+exitregion: ld    a,(preemp)
+            or    a
+            ret   nz
+            ei                      ; EI if not preempted or in dispatcher
+            ret
+
+; -----------------------------------------------------------------------------
+;	I N T E R R U P T   H A N D L E R S
+;     code by Hector Peraza
+; -----------------------------------------------------------------------------
+
+tickspsec   equ   50
+reload      equ   18432             ; CPU freq/1000
+
+timerint:   di
+            ld    (savsp),sp
+            ld    sp,lstintstk      ; local stack for intr hndl
+            push  af
+            push  hl
+            push  de
+            push  bc
+            push  ix
+            push  iy
+            ld    a,0FFh
+            ld    (preemp),a
+            in0   a,(tcr)
+            in0   a,(tmdr0l)
+            in0   a,(tmdr0h)
+            ld    a,(tickn)         ; test tickn, indicates delayed processes
+            or    a
+            jr    z,notickn
+            ld    c,flagset
+            ld    e,1
+            call  xdos              ; set flag #1 each tick
+
+notickn:    ld    hl,cnt1sec
+            dec   (hl)
+            jr    nz,intdone
+            ld    (hl),tickspsec
+            ld    c,flagset
+            ld    e,2
+            call  xdos              ; set flag #2 @ 1 sec
+
+intdone:    xor   a
+            ld    (preemp),a        ; clear preempted flag
+            pop   iy
+            pop   ix
+            pop   bc
+            pop   de
+            pop   hl
+            pop   af
+            ld    sp,(savsp)
+            jp    pdisp             ; dispatch
+
+badint:     di
+            ld    sp,lstintstk
+            ld    a,0FFh
+            ld    (preemp),a
+            ld    hl,bintm
+            call  putmsg
+            di
+            halt
+
+bintm:      db    "BadInt",0
+
+;==============================================================================
+;	D I S K - M A N A G E M E N T   F U N C T I O N S
+
+home:       ld    a,(hstwrt)        ; check for pending write
+            or    a
+            jr    nz,homed
+            ld    (hstact),a        ; clear host active flag
+homed:      ld    bc,0000h
+; -----------------------------------------------------------------------------
+settrk:     ld    (sektrk),bc       ; Set track passed from BDOS in register BC.
+            ret
+; -----------------------------------------------------------------------------
+; Save Sector Number Passed in Reg C.
+
+setsec:     ld    (seksec),bc       ; Set sector passed from BDOS in register BC.
+            ret
+; -----------------------------------------------------------------------------
+
+; Translate Sector (BC), using table at (DE)
+
+sectran:    push  bc
+            pop   hl                ; Null routine: just BC => HL
+            ret
+; -----------------------------------------------------------------------------
+
+setdma:     ld    (dmaadr),bc       ; Buffer addr. in BC
+            ret
+; -----------------------------------------------------------------------------
+seldsk:     ld    hl,0000h          ; Select drive (C): DPH ptr. in HL
+            ld    a,c
+            cp    16                ; 16 for 128MB disk
+            jr    c,chgdsk          ; if invalid drive will give BDOS error
+            ld    a,(userdrv)       ; so set the drive back to a:
+            cp    c                 ; If the default disk is not the same as the
+            ret   nz                ; selected drive then return, 
+            xor   a                 ; else reset default back to a:
+            ld    (userdrv),a       ; otherwise will be stuck in a loop
+            ld    (sekdsk),a
+            ret
+; -----------------------------------------------------------------------------
+chgdsk:     ld    (sekdsk),a
+            rlc   a                 ;*2
+            rlc   a                 ;*4
+            rlc   a                 ;*8
+            rlc   a                 ;*16
+            ld    hl,dpbase
+            ld    b,0
+            ld    c,a 
+            add   hl,bc             ; hl is the new DPB address
+            ret
+
+;------------------------------------------------------------------------------
+            ;read the selected MP/M sector
+read:       xor   a
+            ld    (unacnt),a        ;unacnt = 0
+            inc   a
+            ld    (readop),a        ;read operation
+            ld    (rsflag),a        ;must read data
+            ld    a,wrual
+            ld    (wrtype),a        ;treat as unalloc
+            jp    rwoper            ;to perform the read
+;------------------------------------------------------------------------------
+            ;write the selected MP/M sector
+write:      xor   a                 ;0 to accumulator
+            ld    (readop),a        ;not a read operation
+            ld    a,c               ;write type in c
+            ld    (wrtype),a
+            cp    wrual             ;write unallocated?
+            jr    nz,chkuna         ;check for unalloc
+;
+;                             write to unallocated, set parameters
+            ld    a,blksiz/128      ;next unalloc recs
+            ld    (unacnt),a
+            ld    a,(sekdsk)        ;disk to seek
+            ld    (unadsk),a        ;unadsk = sekdsk
+            ld    hl,(sektrk)
+            ld    (unatrk),hl       ;unatrk = sectrk
+            ld    a,(seksec)
+            ld    (unasec),a        ;unasec = seksec
+;
+;                             check for write to unallocated sector
+chkuna:     ld    a,(unacnt)        ;any unalloc remain?
+            or    a
+            jr    z,alloc           ;skip if not
+;
+;                             more unallocated records remain
+            dec   a                 ;unacnt = unacnt-1
+            ld    (unacnt),a
+            ld    a,(sekdsk)        ;same disk?
+            ld    hl,unadsk
+            cp    (hl)              ;sekdsk = unadsk?
+            jp    nz,alloc          ;skip if not
+;
+;                             disks are the same
+            ld    hl,unatrk
+            call  sektrkcmp      ;sektrk = unatrk?
+            jp    nz,alloc         ;skip if not
+;
+;                             tracks are the same
+            ld    a,(seksec)        ;same sector?
+            ld    hl,unasec
+            cp    (hl)              ;seksec = unasec?
+            jp    nz,alloc          ;skip if not
+;
+;                             match, move to next sector for future ref
+            inc   (hl)              ;unasec = unasec+1
+            ld    a,(hl)            ; end of track?
+            cp    cpmspt            ;count CP/M sectors
+            jr    c,noovf           ;skip if no overflow
+;
+;                             overflow to next track
+            ld    (hl),0            ;unasec = 0
+            ld    hl,(unatrk)
+            inc   hl
+            ld    (unatrk),hl      ;unatrk = unatrk+1
+;
+            ;match found, mark as unnecessary read
+noovf:      xor   a                 ;0 to accumulator
+            ld    (rsflag),a        ;rsflag = 0
+            jr    rwoper            ;to perform the write
+;
+            ;not an unallocated record, requires pre-read
+alloc:      xor   a                 ;0 to accum
+            ld    (unacnt),a        ;unacnt = 0
+            inc   a                 ;1 to accum
+            ld    (rsflag),a        ;rsflag = 1
+
+;------------------------------------------------------------------------------
+            ;enter here to perform the read/write
+rwoper:     xor   a                 ;zero to accum
+            ld    (erflag),a        ;no errors (yet)
+            ld    a,(seksec)        ;compute host sector
+            or    a                 ;carry = 0
+            rra                     ;shift right
+            or   a                  ;carry = 0
+            rra                     ;shift right
+            ld    (sekhst),a        ;host sector to seek
+;
+;                             active host sector?
+            ld    hl,hstact         ;host active flag
+            ld    a,(hl)
+            ld    (hl),1            ;always becomes 1
+            or    a                 ;was it already?
+            jr    z,filhst          ; fill host if not
+;
+;                             host buffer active, same as seek buffer?
+            ld    a,(sekdsk)
+            ld    hl,hstdsk         ;same disk?
+            cp    (hl)              ;sekdsk = hstdsk?
+            jr    nz,nomatch
+;
+;                             same disk, same track?
+            ld    hl,hsttrk
+            call  sektrkcmp         ;sektrk = hsttrk?
+            jr    nz,nomatch
+;
+;                             same disk, same track, same buffer?
+            ld    a,(sekhst)
+            ld    hl,hstsec         ;sekhst = hstsec?
+            cp    (hl)
+            jr    z,match           ;skip if match
+            ;     proper disk, but not correct sector
+nomatch:    ld    a,(hstwrt)        ;host written?
+            or    a
+            call  nz,writehst       ;clear host buff
+            ;     may have to fill the host buffer
+filhst:     ld    a,(sekdsk)
+            ld    (hstdsk),a
+            ld    hl,(sektrk)
+            ld    (hsttrk),hl
+            ld    a,(sekhst)
+            ld    (hstsec),a
+            ld    a,(rsflag)        ;need to read?
+            or    a
+            call  nz,readhst        ;yes, if 1
+            xor   a                 ;0 to accum
+            ld    (hstwrt),a        ;no pending write
+            ;     copy data to or from buffer
+match:      ld    a,(seksec)        ;mask buffer number
+            and   secmsk            ;least signif bits
+            ld    h,a
+            ld    l,128
+            mlt   hl
+;                             hl has relative host buffer address
+            ld    de,hstbuf
+            add   hl,de             ;hl = host address
+            ld    de,(dmaadr)       ;get/put MP/M data
+            ld    a,(readop)        ;which way?
+            or    a
+            jr    nz,rwmove         ;skip if read
+;
+;           write operation, mark and switch direction
+            ld    a,1
+            ld    (hstwrt),a        ;hstwrt = 1
+            ex    de,hl             ;source/dest swap
+;
+            ;BC initially 128, HL is source, DE is dest
+rwmove:     push  de
+            push  hl
+
+            call  swtuser           ;switch to user context
+            di                      ;disable int
+            pop   hl
+            pop   de
+            ld    bc, 128           ;length of move 
+            ei           
+            ldir
+            call  swtsys            ;back to system context
+;
+;                             data has been moved to/from host buffer
+            ld    a,(wrtype)        ;write type
+            cp    wrdir             ;to directory?
+            ld    a,(erflag)        ;in case of errors
+            ret   nz                ;no further processing
+;
+;                             clear host buffer for directory write
+            or    a                 ;errors?
+            ret   nz                ;skip if so
+            xor   a                 ;0 to accum
+            ld    (hstwrt),a        ;buffer written
+            call  writehst
+            ld    a,(erflag)
+            ret
+
+;------------------------------------------------------------------------------
+;Utility subroutine for 16-bit compare
+sektrkcmp:
+            ;HL = .unatrk or .hsttrk, compare with sektrk
+            ex    de,hl
+            ld    hl,sektrk
+            ld    a,(de)            ;low byte compare
+            cp    (hl)              ;same?
+            ret   nz                ;return if not
+;                             low bytes equal, test high 1s
+            inc   de
+            inc   hl
+            ld    a,(de)
+            cp    (hl)              ;sets flags
+            ret
+
+;==============================================================================
+; Convert track/head/sector into LBA for physical access to the disk
+; 00Vvvvvv|vvTttttt|tttsssss   some serious bitshifting ahead
+; code by Rienk H. Koolstra
+;==============================================================================
+SetLBAadr:  ld    hl,(hsttrk)       ; 0000000T tttttttt
+            ld    a,l               ; tttttttt
+            and   07h               ; 00000ttt
+            rrca                    ; t00000tt
+            rrca                    ; tt00000t
+            rrca                    ; ttt00000
+            ld    b,a
+            ld    a,(hstsec)        ; 000sssss
+            or    b                 ; tttsssss
+            ld    (lba0),a
+
+            ld    a,l               ; tttttttt
+            and   0F8h              ; ttttt000
+            or    h                 ; ttttt00T
+            rrca                    ; Tttttt00
+            rrca                    ; 0Tttttt0
+            rrca                    ; 00Tttttt
+            ld    b,a
+            ld    a,(hstdsk)        ; Vvvvvvvv (V is used for the 128+ diskset)
+            rrca                    ; vVvvvvvv
+            rrca                    ; vvVvvvvv
+            ld    c,a
+            and   0C0h              ; vv000000
+            or    b                 ; vvTttttt
+            ld    (lba1),a
+
+            ld    a,c               ; vvVvvvvv
+            and   3Fh               ; 00Vvvvvv
+            ld    (lba2),a
+; -----------------------------------------------------------------------------
+; LBA Mode using drive 0 = E0
+            ld    a,0E0h
+            ld    (lba3),a
+
+            ld    a,(lba0)
+            out   (CF_LBA0),a
+
+            ld    a,(lba1)
+            out   (CF_LBA1),a
+
+            ld    a,(lba2)
+            out   (CF_LBA2),a
+
+            ld    a,(lba3)
+            out   (CF_LBA3),a
+
+            ld    a,1
+            out   (CF_SECCOUNT),a
+
+            ret    
+
+;==============================================================================
+; Read physical sector from host
+;==============================================================================
+
+readhst:    push   af
+            push   bc
+            push   hl
+
+            call  cfWait
+            call  SetLBAadr
+
+            ld    a,CF_READ_SEC
+            out   (CF_COMMAND),a
+
+            call  cfWait
+            ld    hl,hstbuf
+            ld    b,0
+            ld    c,CF_DATA
+            inir                    ; input 256 bytes
+            inir                    ; and another 256
+
+            pop   hl
+            pop   bc
+            pop   af
+
+            xor   a
+            ld    (erflag),a
+            ret
+
+;==============================================================================
+; Write physical sector to host
+;==============================================================================
+
+writehst:   push  af
+            push  bc
+            push  hl
+
+            call  cfWait
+            call  SetLBAadr
+
+            ld    a,CF_WRITE_SEC
+            out   (CF_COMMAND),a
+
+            call  cfWait
+            ld    hl,hstbuf
+            ld    b,0
+            ld    c,CF_DATA
+            otir                    ; output 256 bytes
+            otir                    ; and another 256
+
+            pop   hl
+            pop   bc
+            pop   af
+
+            xor   a
+            ld    (erflag),a
+            ret
+
+;==============================================================================
+; Wait for disk to be ready (busy=0,ready=1)
+;==============================================================================
+
+cfWait:     push  af
+            in    a,(CF_STATUS)     ;Read status register
+            bit   7,a               ;Test Busy flag
+            jr    z, cfReady
+            ; High so busy
+            ld    c,poll
+            ld    e,pldsk
+            call  xdos              ; poll CF disk
+
+cfReady:    pop   af
+            ret
+
+;==============================================================================
+; Data storage
+;==============================================================================
+
+bnktbl:     ds    8
+cnt1sec:    db    tickspsec         ; ticks per second counter
+
+timdbg      ds    1                 ; Timer Debuger
+
+intstk:                             ; local interrupt stack	
+            dw    0c7c7h,0c7c7h,0c7c7h,0c7c7h,0c7c7h
+            dw    0c7c7h,0c7c7h,0c7c7h,0c7c7h,0c7c7h
+            dw    0c7c7h,0c7c7h,0c7c7h,0c7c7h,0c7c7h
+            dw    0c7c7h,0c7c7h,0c7c7h,0c7c7h,0c7c7h
+lstintstk:        
+savsp:      ds    2                 ; saved SP during interrupts
+tickn:      db    0                 ; ticking boolean, true = delayed
+preemp:     db    0                 ; preempted boolean
+                  
+userdrv:    ds    1                 ; Boot-drive number
+
+localData:                    ; XIOS workspace
+
+dirbuf:     ds    128               ;scratch directory area
+alv00:      ds    257               ;allocation vector 0
+alv01:      ds    257               ;allocation vector 1
+alv02:      ds    257               ;allocation vector 2
+alv03:      ds    257               ;allocation vector 3
+alv04:      ds    257               ;allocation vector 4
+alv05:      ds    257               ;allocation vector 5
+alv06:      ds    257               ;allocation vector 6
+alv07:      ds    257               ;allocation vector 7
+alv08:      ds    257               ;allocation vector 8
+alv09:      ds    257               ;allocation vector 9
+alv10:      ds    257               ;allocation vector 10
+alv11:      ds    257               ;allocation vector 11
+alv12:      ds    257               ;allocation vector 12
+alv13:      ds    257               ;allocation vector 13
+alv14:      ds    257               ;allocation vector 14
+alv15:      ds    257               ;allocation vector 15
+
+lba0        db    00h
+lba1        db    00h
+lba2        db    00h
+lba3        db    00h
+
+sekdsk:     ds    1                 ;seek disk number
+sektrk:     ds    2                 ;seek track number
+seksec:     ds    2                 ;seek sector number
+;
+hstdsk:     ds    1                 ;host disk number
+hsttrk:     ds    2                 ;host track number
+hstsec:     ds    1                 ;host sector number
+;
+sekhst:     ds    1                 ;seek shr secshf
+hstact:     ds    1                 ;host active flag
+hstwrt:     ds    1                 ;host written flag
+;
+unacnt:     ds    1                 ;unalloc rec cnt
+unadsk:     ds    1                 ;last unalloc disk
+unatrk:     ds    2                 ;last unalloc track
+unasec:     ds    1                 ;last unalloc sector
+;
+erflag:     ds    1                 ;error reporting
+rsflag:     ds    1                 ;read sector flag
+readop:     ds    1                 ;1 if read operation
+wrtype:     ds    1                 ;write operation type
+dmaadr:     ds    2                 ;last dma address
+hstbuf:     ds    512               ;host buffer
+
+; -----------------------------------------------------------------------------
+; Cold-boot code, overlayed by local workspace above
+; -----------------------------------------------------------------------------
+
+            org   localData
+
+;	B O O T S T R A P   F U N C T I O N S
+; On entry: C, DE = Debuger (not used), HL = BIOS direct jump table address.
+;
+systeminit: xor   a                 ; Cold Start
+            ld    (userdrv),a       ; Start from the boot disk (Drive A:, User 0)
+            ld    (hstact),a        ; Host Buffer inactive
+            ld    (unacnt),a        ; unalloc. ctr. = 0
+;
+            ld    (timdbg),a        ; Timer Debuger
+;
+            ld    hl,tpabuf         ; Address of BIOS DMA buffer.
+            ld    (dmaadr),hl
+
+
+            ld    hl,Welcome
+            push  de
+            call  PutMsg            ; Print welcome banner
+            pop   de
+
+            di
+            xor   a
+            out0  (tcr),a           ; disable ints and RPT downcounting
+            ld    hl,reload
+            out0  (rldr0l),l
+            out0  (rldr0h),h
+
+; init the Z180 int table (must begin on a 32-byte boundary)
+
+            ld    hl,itbl
+            ld    a,l
+            out0  (il),a            ; set Z180 low address
+            ld    a,h               ; get page
+            ld    i,a               ; to int register
+
+            ld    a,11h             ; trurn ints on and enable downcounting
+            out0  (tcr),a
+            ld    a,01h             ; activate INT0 and interrupts
+            out0  (itc),a
+
+; initialize mmu
+;    Common(0) not used
+;    Bank      0x0000 to 0xAFFF -> 0x80000 to 0x8AFFF 
+;    Common(1) 0xB000 to 0xFFFF -> 0x88000 to 0x8FFFF
+            ld    a, 0B0h           ; 44k bank
+            out0  (cbar),a
+            ld    a, 080h           ; base bank address 0x80000h
+            out0  (bbr),a
+
+; initialize MP/M banks
+            ld    hl,0
+            ld    de,Welcome        ; use the welcome message as storage area
+            ld    bc,64             ; copy the first 64 bytes (contains XIOS and
+            ldir                    ; BDOS vectors, etc.)
+            ld    a,7
+inib2:      push  af
+            call  selbank
+            ld    hl,Welcome
+            ld    de,0
+            ld    bc,64
+            ldir
+            pop   af
+            dec   a
+            jr    nz,inib2
+            call  selbank           ; switch bank 0 back in
+
+            ei
+            ret
+
+Welcome:    db	CR,LF,"Banked XIOS v1.0 for RC2014 by T.Pycio 2021",CR,0
+
+            end
