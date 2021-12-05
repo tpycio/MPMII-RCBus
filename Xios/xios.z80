@@ -171,7 +171,7 @@ dpbLast:    dw    128               ;SPT - sectors per track
             dw    0                 ;OFF - Reserved tracks
 
 ; -----------------------------------------------------------------------------
-; Output ASCI on console 0
+; Output ASCII on console 0
 
 PutMsg:     ld    a,(hl)            ; Affects A, BC, HL
             and   a
@@ -205,6 +205,7 @@ plci0       equ   1                 ; poll console #0 input
 plco0       equ   2                 ; poll console #0 output
 plci1       equ   3                 ; poll console #1 input
 plco1       equ   4                 ; poll console #1 output
+;pllpt       equ   5                 ; poll LPT     
 
             ; Console status
 const:      call  ptbljmp           ; compute and jump to hndlr
@@ -278,8 +279,8 @@ polco0:     in0   a,(STAT0)         ; Read UART status register of COM port 0.
 polci1:
 pt1st:      in0   a,(STAT1)         ; Console status
             and   80h               ; Receive register (ST_RDRF) full?
-            ret   z                 ; 00 - not ready
-            ld    a,0FFh            ; FF - ready
+            ret   z                 ; 00h - not ready
+            ld    a,0FFh            ; FFh - ready
             ret
 
 pt1in:      ld    c,poll
@@ -308,14 +309,11 @@ polco1:     in0   a,(STAT1)         ; Read UART status register of COM port 1.
             ret
 
 ; -----------------------------------------------------------------------------
-;	L I S T   D E V I C E
+;	L I S T   D E V I C E  (in progress)
 
-; List Device Status
 ;pollpt:
-listst:     in0   a,(SPORT)         ; Get status
-            rlca                    ; A[7] (ready) -> CY
-            sbc   a,a               ; A = -1 if CY set
-            ret                     ; Returns A, & NZ if ready
+listst:     xor   a
+            ret                     ; 00h - not ready
 
 ; Output C on Printer
 list:
@@ -327,13 +325,7 @@ lptout:     call  listst            ; Busy?
 ;            call  xdos
 ;            pop   bc
 lptrdy:
-            out0  (DPORT),c         ; Latch data
-            ld    a,0Dh
-            out0  (CPORT),a         ; STB = 1
-            nop
-            nop                     ; Pause
-            ld    a,0Ch
-            out0  (CPORT),a         ; STB = 0
+            out0  (PIOAD),c         ; Latch data
             ret
 
 ; -----------------------------------------------------------------------------
@@ -833,7 +825,6 @@ cfReady:    pop   af
 ; Data storage
 ;==============================================================================
 
-bnktbl:     ds    8
 cnt1sec:    db    tickspsec         ; ticks per second counter
 
 timdbg      ds    1                 ; Timer Debuger
@@ -850,7 +841,7 @@ preemp:     db    0                 ; preempted boolean
                   
 userdrv:    ds    1                 ; Boot-drive number
 
-localData:                    ; XIOS workspace
+localData:              ; XIOS workspace
 
 dirbuf:     ds    128               ;scratch directory area
 alv00:      ds    257               ;allocation vector 0
@@ -931,6 +922,8 @@ systeminit: xor   a                 ; Cold Start
             out0  (rldr0l),l
             out0  (rldr0h),h
 
+            ld    a, 00001111b      ; Set output PIO PortA
+            out   (PIOAC), a
 ; init the Z180 int table (must begin on a 32-byte boundary)
 
             ld    hl,itbl

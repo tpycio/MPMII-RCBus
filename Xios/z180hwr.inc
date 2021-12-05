@@ -120,9 +120,10 @@ CF_WRITE_SEC equ   030h
 CF_SET_FEAT  equ   0EFh
 
 ; **********************************************************************
-; Parallel Port IO Addresses
+; PIO I/O Addresses
 
-DPORT        equ   8Ch		; Data port
-SPORT        equ   8Dh		; Status port
-CPORT        equ   8Eh		; Control port
+PIOAD        equ   4Ch              ; Data port A
+PIOBD        equ   4Dh              ; Data port B
+PIOAC        equ   4Eh              ; Control port A
+PIOBC        equ   4Fh              ; Control port B
 
