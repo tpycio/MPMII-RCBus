@@ -725,24 +725,18 @@ SetLBAadr:  ld    hl,(hsttrk)       ; 0000000T tttttttt
             ld    a,c               ; vvVvvvvv
             and   3Fh               ; 00Vvvvvv
             ld    (lba2),a
-; -----------------------------------------------------------------------------
-; LBA Mode using drive 0 = E0
-            ld    a,0E0h
+            ld    a,0E0h            ; LBA Mode using drive 0 = E0
             ld    (lba3),a
 
-            ld    a,(lba0)
-            out   (CF_LBA0),a
+            ld    c,CF_LBA0         ; first LBA port
+            ld    hl,lba0           ; set first LBA
+            ld    b,4               ; 4 to go
+sl1:        outi                    ; output and increment HL
+            jr    z,sl2             ; if all 4 done, exit
+            inc   c                 ; next LBA Port
+            jr    sl1               ; output next LBA
 
-            ld    a,(lba1)
-            out   (CF_LBA1),a
-
-            ld    a,(lba2)
-            out   (CF_LBA2),a
-
-            ld    a,(lba3)
-            out   (CF_LBA3),a
-
-            ld    a,1
+sl2:        ld    a,1
             out   (CF_SECCOUNT),a
 
             ret    
