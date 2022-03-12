@@ -7,8 +7,8 @@ Version 1.0 Pre-release
 
 Tadeusz Pycio
 
-WARNING: This is MP/M OS for Z180 working with modified SCM BIOS loading OS from address 0x80000 instead of 0xF0000!
-Requires a CF 128MB, CF module with I/O address 0x10 and running CP/M 2.2
+Requirements:
+Z180 system running [SCM v1.3](https://smallcomputercentral.wordpress.com/small-computer-monitor/) (earlier versions require memory mapping to be changed from 0xF000 to 0x8000), 512kB RAM, CF memory module at address 0x10, 128MB CF card and running CP/M 2.2 under this configuration.
 
 # Getting Assistance
 
