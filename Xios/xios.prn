@@ -1,0 +1,1289 @@
+ZSM 4.4	Source file: XIOS     	14-Apr-2022  15:11:33	Page    1
+MP/M-II Banked XIOS for RC2014
+
+                                            ; Get processor, chip and general equates
+                                            .z180
+                             C              include z180hwr.inc
+                             C  ;
+                             C  ;========== Z180 Internal Interrupt Vectors ========
+                             C  
+                             C  ; The following vectors are offsets from the value 
+                             C  ; loaded in IL, the Interrupt Vector Low register.
+                             C  
+  0000  =                    C  VINT1        equ   0		;External INT-1 pin
+  0002  =                    C  VINT2        equ   2		;External INT-2 pin
+  0004  =                    C  VPRT0        equ   4		;Timer 0
+  0006  =                    C  VPRT1        equ   6		;Timer 1
+  0008  =                    C  VDMA0        equ   8		;DMA Ch-0
+  000A  =                    C  VDMA1        equ   0Ah		;DMA Ch-1
+  000C  =                    C  VCSIO        equ   0Ch		;Clocked serial I/O
+  000E  =                    C  VASC0        equ   0Eh		;Asynch. comms. Ch-0
+  0010  =                    C  VASC1        equ   10h		;Asynch. comms. Ch-1
+                             C  
+                             C  ;========== Z180 System Control Registers ==========
+                             C  ;NB These registers may be relocated to multiples of
+                             C  ; 40H, by setting the IO Control Register (ICR = 3FH)
+                             C  ; The addresses below are valid with ICR=0 (else they
+                             C  ; are offsets from the ICR base value).
+                             C  
+  00C0  =                    C  BASEIO       equ   0C0h		; Base address Z180 
+                             C  
+                             C  ; ASCI Registers
+                             C  
+  00C0  =                    C  CNTLA0       equ   BASEIO+00H	; ASCI Control Reg A Ch0
+  00C1  =                    C  CNTLA1       equ   BASEIO+01H	; ASCI Control Reg A Ch1
+  00C2  =                    C  CNTLB0       equ   BASEIO+02H	; ASCI Control Reg B Ch0
+  00C3  =                    C  CNTLB1       equ   BASEIO+03H	; ASCI Control Reg B Ch1
+  00C4  =                    C  STAT0        equ   BASEIO+04H	; ASCI Status Reg Ch0
+  00C5  =                    C  STAT1        equ   BASEIO+05H	; ASCI Status Reg Ch1
+  00C6  =                    C  TDR0         equ   BASEIO+06H	; ASCI TX Data Reg Ch0
+  00C7  =                    C  TDR1         equ   BASEIO+07H	; ASCI TX Data Reg Ch1
+  00C8  =                    C  RDR0         equ   BASEIO+08H	; ASCI RX Data Reg Ch0
+  00C9  =                    C  RDR1         equ   BASEIO+09H	; ASCI RX Data Reg Ch1
+  00D2  =                    C  BRK0         equ   BASEIO+12H	; Break Control Reg Ch0
+  00D3  =                    C  BRK1         equ   BASEIO+13H	; Break Control reg Ch1
+                             C  
+                             C  ; CSI/O Registers
+                             C  
+  00CA  =                    C  CNTR         equ   BASEIO+0AH	; CSI/O Control Reg
+  00CB  =                    C  TRDR         equ   BASEIO+0BH	; CSI/O TX/RX Data Reg
+                             C  
+                             C  ; Timer Registers
+                             C  
+  00CC  =                    C  TMDR0L       equ   BASEIO+0Ch	; Timer Data Reg Ch0-Low
+  00CD  =                    C  TMDR0H       equ   BASEIO+0Dh	; Timer Data Reg Ch0-High
+  00CE  =                    C  RLDR0L       equ   BASEIO+0Eh	; Timer Reload Reg Ch0-Low
+  00CF  =                    C  RLDR0H       equ   BASEIO+0Fh	; Timer Reload Reg Ch0-High
+  00D0  =                    C  TCR          equ   BASEIO+10h	; Timer Control Reg
+  00D4  =                    C  TMDR1L       equ   BASEIO+14h	; Timer Data Reg Ch1-Low
+  00D5  =                    C  TMDR1H       equ   BASEIO+15h	; Timer Data Reg Ch1-High
+  00D6  =                    C  RLDR1L       equ   BASEIO+16h	; Timer Reload Reg Ch1-Low
+ZSM 4.4	Source file: XIOS     	14-Apr-2022  15:11:33	Page    2
+MP/M-II Banked XIOS for RC2014
+
+  00D7  =                    C  RLDR1H       equ   BASEIO+17h	; Timer Reload Reg Ch1-High
+  00D8  =                    C  FRC          equ   BASEIO+18h	; Free-Running Counter
+                             C  
+                             C  ; DMA Registers
+                             C  
+  00E0  =                    C  SAR0L        equ   BASEIO+20h	; DMA Source Addr Reg Ch0-Low
+  00E1  =                    C  SAR0H        equ   BASEIO+21h	; DMA Source Addr Reg Ch0-High
+  00E2  =                    C  SAR0B        equ   BASEIO+22h	; DMA Source Addr Reg Ch0-B
+  00E3  =                    C  DAR0L        equ   BASEIO+23h	; DMA Destn  Addr Reg Ch0-Low
+  00E4  =                    C  DAR0H        equ   BASEIO+24h	; DMA Destn  Addr Reg Ch0-High
+  00E5  =                    C  DAR0B        equ   BASEIO+25h	; DMA Destn  Addr Reg Ch0-B
+  00E6  =                    C  BCR0L        equ   BASEIO+26h	; DMA Byte Count Reg Ch0-Low
+  00E7  =                    C  BCR0H        equ   BASEIO+27h	; DMA Byte Count Reg Ch0-High
+  00E8  =                    C  MAR1L        equ   BASEIO+28h	; DMA Memory Addr Reg Ch1-Low
+  00E9  =                    C  MAR1H        equ   BASEIO+29h	; DMA Memory Addr Reg Ch1-High
+  00EA  =                    C  MAR1B        equ   BASEIO+2Ah	; DMA Memory Addr Reg Ch1-B
+  00EB  =                    C  IAR1L        equ   BASEIO+2Bh	; DMA I/O Addr Reg Ch1-Low
+  00EC  =                    C  IAR1H        equ   BASEIO+2Ch	; DMA I/O Addr Reg Ch1-High
+  00EE  =                    C  BCR1L        equ   BASEIO+2Eh	; DMA Byte Count Reg Ch1-Low
+  00EF  =                    C  BCR1H        equ   BASEIO+2Fh	; DMA Byte Count Reg Ch1-High
+  00F0  =                    C  DSTAT        equ   BASEIO+30h	; DMA Status Reg
+  00F1  =                    C  DMODE        equ   BASEIO+31h	; DMA Mode Reg
+  00F2  =                    C  DCNTL        equ   BASEIO+32h	; DMA/WAIT Control Reg
+                             C  
+                             C  ; System Control Registers
+                             C  
+  00DF  =                    C  CCR          equ  BASEIO+1Fh	; CPU control reg.
+  00F3  =                    C  IL           equ  BASEIO+33h	; INT Vector Low Reg
+  00F4  =                    C  ITC          equ  BASEIO+34h	; INT/TRAP Control Reg
+  00F6  =                    C  RCR          equ  BASEIO+36h	; Refresh Control Reg
+  00F8  =                    C  CBR          equ  BASEIO+38h	; MMU Common Base Reg
+  00F9  =                    C  BBR          equ  BASEIO+39h	; MMU Bank Base Reg
+  00FA  =                    C  CBAR         equ  BASEIO+3Ah	; MMU Common/Bank Area Reg
+  00FE  =                    C  OMCR         equ  BASEIO+3Eh	; Operation Mode Control Reg
+  00FF  =                    C  ICR          equ  BASEIO+3Fh	; I/O Control Reg
+                             C  
+                             C  ; **********************************************************************
+                             C  ; Serial status register bits
+                             C  
+  0007  =                    C  ST_RDRF      equ   7              ;Receive data register Full
+  0001  =                    C  ST_TDRE      equ   1              ;Transmit data register empty
+                             C  
+                             C  ; **********************************************************************
+                             C  ; CF registers
+  0010  =                    C  CF_DATA      equ   10h
+  0011  =                    C  CF_FEATURES  equ   11h
+  0011  =                    C  CF_ERROR     equ   11h
+  0012  =                    C  CF_SECCOUNT  equ   12h
+  0013  =                    C  CF_SECTOR    equ   13h
+  0014  =                    C  CF_CYL_LOW   equ   14h
+  0015  =                    C  CF_CYL_HI    equ   15h
+  0016  =                    C  CF_HEAD      equ   16h
+  0017  =                    C  CF_STATUS    equ   17h
+  0017  =                    C  CF_COMMAND   equ   17h
+  0013  =                    C  CF_LBA0      equ   13h
+  0014  =                    C  CF_LBA1      equ   14h
+  0015  =                    C  CF_LBA2      equ   15h
+ZSM 4.4	Source file: XIOS     	14-Apr-2022  15:11:33	Page    3
+MP/M-II Banked XIOS for RC2014
+
+  0016  =                    C  CF_LBA3      equ   16h
+                             C  
+                             C  ;CF Features
+  0001  =                    C  CF_8BIT      equ   1
+  0082  =                    C  CF_NOCACHE   equ   082h
+                             C  ;CF Commands
+  0020  =                    C  CF_READ_SEC  equ   020h
+  0030  =                    C  CF_WRITE_SEC equ   030h
+  00EF  =                    C  CF_SET_FEAT  equ   0EFh
+                             C  
+                             C  ; **********************************************************************
+                             C  ; PIO I/O Addresses
+                             C  
+  004C  =                    C  PIOAD        equ   4Ch              ; Data port A
+  004D  =                    C  PIOBD        equ   4Dh              ; Data port B
+  004E  =                    C  PIOAC        equ   4Eh              ; Control port A
+  004F  =                    C  PIOBC        equ   4Fh              ; Control port B
+                             C  
+                                
+                                ;******************************************************************************
+                                ;******************************************************************************
+                                ;**                                                                          **
+                                ;**                  M P / M  I I   B a n k e d   X I O S                    **
+                                ;**                            by Tadeusz Pycio                              **
+                                ;**                                                                          **
+                                ;******************************************************************************
+                                ;******************************************************************************
+                                ;  Build:   ZSM XIOS,XIOS=XIOS.Z80                                
+                                ;           LINK BNKXIOS=XIOS[NR,OS]                              
+                                ;
+                                ;  Program uses snippets of code written by Hector Peraza, Rienk H. Koolstra, 
+                                ;  and Digital Research.
+                                ;
+                                ;  Revision History:                                              
+                                ;  Rev    Date         Author                Comments             
+                                ;  0.2    23-09-2021   Tadeusz Pycio         Created 
+                                ;  1.0    04-12-2021   Tadeusz Pyvio         Public release              
+                                ;                                                                 
+                                ;******************************************************************************
+                                
+  0000  =                       false       equ   0
+  FFFF  =                       true        equ   -1
+                                
+  0000  =                       debug       equ   false
+                                
+  0080  =                       tpabuf      equ   80h               ; Default I/O buffer and command line storage
+                                
+                                ; Ascii Character Equates
+  000A  =                       LF          equ   0Ah         ; Line Feed
+  000D  =                       CR          equ   0Dh         ; Carriage Return
+                                
+                                
+                                            cseg
+                                
+                                ; Jump vectors for individual subroutines
+                                
+  0000' C3 004B'                XIOS:       jp    commonbase        ; CommonBase, Terminate process
+ZSM 4.4	Source file: XIOS     	14-Apr-2022  15:11:33	Page    4
+MP/M-II Banked XIOS for RC2014
+
+  0003' C3 0072'                wboot:      jp    warmstart         ; Warm Boot, Terminate process
+  0006' C3 01B2'                            jp    const             ; Check for console char ready
+  0009' C3 01B9'                            jp    conin             ; Read console character in
+  000C' C3 01C0'                            jp    conout            ; Write console character out
+  000F' C3 0243'                            jp    list              ; Write list character out
+  0012' C3 01CC'                            jp    rtnempty          ; not used by MP/M II
+  0015' C3 01CC'                            jp    rtnempty          ; not used by MP/M II
+  0018' C3 02F6'                            jp    home              ; Move to track 00
+  001B' C3 0314'                            jp    seldsk            ; Select disk drive
+  001E' C3 0302'                            jp    settrk            ; Set track number
+  0021' C3 0307'                            jp    setsec            ; Set sector number
+  0024' C3 030F'                            jp    setDMA            ; Set DMA address
+  0027' C3 033C'                            jp    read              ; Read selected sector
+  002A' C3 034F'                            jp    write             ; Write selected sector
+  002D' C3 01CC'                            jp    rtnempty          ; not used by MP/M II
+  0030' C3 030C'                            jp    sectran           ; Sector translate subroutine
+                                
+  0033' C3 026F'                            jp    selmemory         ; Select memory
+  0036' C3 024F'                            jp    polldevice        ; Poll device
+  0039' C3 027F'                            jp    startclock        ; Start clock
+  003C' C3 0285'                            jp    stopclock         ; Stop clock
+  003F' C3 028A'                            jp    exitregion        ; Exit critical region
+  0042' C3 024C'                            jp    maxconsole        ; Maximum console number
+  0045' C3 0524'                            jp    systeminit        ; System initialization
+  0048' 00 00 00                            db    0,0,0             ; force use of internal dispatch @ idle
+                                ;           jp    idle
+                                
+                                ; -----------------------------------------------------------------------------
+  004B' C3 0072'                commonbase: jp    coldstart
+  004E' C3 0000                 swtuser:    jp    $-$
+  0051' C3 0000                 swtsys:     jp    $-$
+  0054' C3 0000                 pdisp:      jp    $-$
+  0057' C3 0000                 xdos:       jp    $-$
+  005A' 0000                    sysdat:     dw    $-$
+                                ; -----------------------------------------------------------------------------
+                                ; Padding string, exactly 4 bytes long, to make sure that the interrupt
+                                ; table begins on an 32-byte boundary
+                                
+  005C' 5A 31 38 30                         db    "Z180"
+                                
+                                ; Z180 interrupt table, must begin in a 32-byte boundary
+                                
+  0060' 02DE'                   itbl:       dw    badint            ;External INT-1 pin
+  0062' 02DE'                               dw    badint            ;External INT-2 pin
+  0064' 0291'                               dw    timerint          ;Timer 0
+  0066' 02DE'                               dw    badint            ;Timer 1
+  0068' 02DE'                               dw    badint            ;DMA Ch-0
+  006A' 02DE'                               dw    badint            ;DMA Ch-1
+  006C' 02DE'                               dw    badint            ;Clocked serial I/O
+  006E' 02DE'                               dw    badint            ;Asynch. comms. Ch-0
+  0070' 02DE'                               dw    badint            ;Asynch. comms. Ch-1
+                                ; -----------------------------------------------------------------------------
+  0072'                         coldstart:
+  0072' 0E 00                   warmstart:  ld    c,0
+  0074' C3 0057'                            jp    xdos              ; system reset, terminate process
+                                
+                                ;==============================================================================
+ZSM 4.4	Source file: XIOS     	14-Apr-2022  15:11:33	Page    5
+MP/M-II Banked XIOS for RC2014
+
+                                ;	D I S K   O R G A N I S A T I O N   T A B L E S
+                                ;==============================================================================
+                                
+  1000  =                       blksiz      equ   4096              ;MP/M allocation size
+  0200  =                       hstsiz      equ   512               ;host disk sector size
+  0020  =                       hstspt      equ   32                ;host disk sectors/trk
+  0004  =                       hstblk      equ   hstsiz/128        ;MP/M sects/host buff
+  0080  =                       cpmspt      equ   hstblk * hstspt   ;MP/M sectors/track
+  0003  =                       secmsk      equ   hstblk-1          ;sector mask
+                                
+  0000  =                       wrall       equ   0                 ; write to allocated
+  0001  =                       wrdir       equ   1                 ; write to directory
+  0002  =                       wrual       equ   2                 ; write to unallocated
+                                
+                                ;==============================================================================
+                                ; Disk parameter headers for disk 0 to 15
+                                ;==============================================================================
+                                
+  0077' 0000  0000  0000        dpbase:     dw    0000h,0000h,0000h,0000h,dirbuf,dpb0,0000h,alv00
+  007D' 0000  0524' 0177'       
+  0083' 0000  05A4'             
+  0087' 0000  0000  0000                    dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv01
+  008D' 0000  0524' 0186'       
+  0093' 0000  06A5'             
+  0097' 0000  0000  0000                    dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv02
+  009D' 0000  0524' 0186'       
+  00A3' 0000  07A6'             
+  00A7' 0000  0000  0000                    dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv03
+  00AD' 0000  0524' 0186'       
+  00B3' 0000  08A7'             
+  00B7' 0000  0000  0000                    dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv04
+  00BD' 0000  0524' 0186'       
+  00C3' 0000  09A8'             
+  00C7' 0000  0000  0000                    dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv05
+  00CD' 0000  0524' 0186'       
+  00D3' 0000  0AA9'             
+  00D7' 0000  0000  0000                    dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv06
+  00DD' 0000  0524' 0186'       
+  00E3' 0000  0BAA'             
+  00E7' 0000  0000  0000                    dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv07
+  00ED' 0000  0524' 0186'       
+  00F3' 0000  0CAB'             
+  00F7' 0000  0000  0000                    dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv08
+  00FD' 0000  0524' 0186'       
+  0103' 0000  0DAC'             
+  0107' 0000  0000  0000                    dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv09
+  010D' 0000  0524' 0186'       
+  0113' 0000  0EAD'             
+  0117' 0000  0000  0000                    dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv10
+  011D' 0000  0524' 0186'       
+  0123' 0000  0FAE'             
+  0127' 0000  0000  0000                    dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv11
+  012D' 0000  0524' 0186'       
+  0133' 0000  10AF'             
+  0137' 0000  0000  0000                    dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv12
+  013D' 0000  0524' 0186'       
+  0143' 0000  11B0'             
+ZSM 4.4	Source file: XIOS     	14-Apr-2022  15:11:33	Page    6
+MP/M-II Banked XIOS for RC2014
+
+  0147' 0000  0000  0000                    dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv13
+  014D' 0000  0524' 0186'       
+  0153' 0000  12B1'             
+  0157' 0000  0000  0000                    dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv14
+  015D' 0000  0524' 0186'       
+  0163' 0000  13B2'             
+  0167' 0000  0000  0000                    dw    0000h,0000h,0000h,0000h,dirbuf,dpbLast,0000h,alv15
+  016D' 0000  0524' 0195'       
+  0173' 0000  14B3'             
+                                            
+                                ; First drive has a reserved track for MP/M
+                                
+  0177' 0080                    dpb0:       dw    128               ;SPT - sectors per track
+  0179' 05                                  db    5                 ;BSH - block shift factor
+  017A' 1F                                  db    31                ;BLM - block mask
+  017B' 01                                  db    1                 ;EXM - Extent mask
+  017C' 07FB                                dw    2043              ; (2047-4) DSM - Storage size (blocks - 1)
+  017E' 01FF                                dw    511               ;DRM - Number of directory entries - 1
+  0180' F0                                  db    240               ;AL0 - 1 bit set per directory block
+  0181' 00                                  db    0                 ;AL1 -            "
+  0182' 0000                                dw    0                 ;CKS - DIR check vector size (DRM+1)/4 (0=fixed disk)
+  0184' 0001                                dw    1                 ;OFF - Reserved tracks
+                                
+  0186' 0080                    dpb:        dw    128               ;SPT - sectors per track
+  0188' 05                                  db    5                 ;BSH - block shift factor
+  0189' 1F                                  db    31                ;BLM - block mask
+  018A' 01                                  db    1                 ;EXM - Extent mask
+  018B' 07FF                                dw    2047              ;DSM - Storage size (blocks - 1)
+  018D' 01FF                                dw    511               ;DRM - Number of directory entries - 1
+  018F' F0                                  db    240               ;AL0 - 1 bit set per directory block
+  0190' 00                                  db    0                 ;AL1 -            "
+  0191' 0000                                dw    0                 ;CKS - DIR check vector size (DRM+1)/4 (0=fixed disk)
+  0193' 0000                                dw    0                 ;OFF - Reserved tracks
+                                
+                                ; Last drive is smaller because CF is never full 128MB
+                                
+  0195' 0080                    dpbLast:    dw    128               ;SPT - sectors per track
+  0197' 05                                  db    5                 ;BSH - block shift factor
+  0198' 1F                                  db    31                ;BLM - block mask
+  0199' 01                                  db    1                 ;EXM - Extent mask
+  019A' 01FF                                dw    511               ;DSM - Storage size (blocks - 1)  ; 511 = 2MB (for 128MB card)
+  019C' 01FF                                dw    511               ;DRM - Number of directory entries - 1
+  019E' F0                                  db    240               ;AL0 - 1 bit set per directory block
+  019F' 00                                  db    0                 ;AL1 -            "
+  01A0' 0000                                dw    0                 ;CKS - DIR check vector size (DRM+1)/4 (0=fixed disk)
+  01A2' 0000                                dw    0                 ;OFF - Reserved tracks
+                                
+                                ; -----------------------------------------------------------------------------
+                                ; Output ASCII on console 0
+                                
+  01A4' 7E                      PutMsg:     ld    a,(hl)            ; Affects A, BC, HL
+  01A5' A7                                  and   a
+  01A6' C8                                  ret   z                 ; Zero terminates
+  01A7' 4F                                  ld    c,a
+  01A8' 16 00                               ld    d,0               ; console 0
+  01AA' E5                                  push  hl
+  01AB' CD 01C0'                            call  conout            ; Display 1 char.
+ZSM 4.4	Source file: XIOS     	14-Apr-2022  15:11:33	Page    7
+MP/M-II Banked XIOS for RC2014
+
+  01AE' E1                                  pop   hl
+  01AF' 23                                  inc   hl
+  01B0' 18 F2                               jr    PutMsg
+                                
+                                ; -----------------------------------------------------------------------------
+                                ;	I / O   H A N D L E R S 
+                                
+  0002  =                       numcns      equ   2                 ; number of consoles
+                                
+  0083  =                       poll        equ   131               ; XDOS poll function
+  0086  =                       makeque     equ   134               ; XDOS make queue
+  0089  =                       readque     equ   137               ; XDOS read queue
+  008B  =                       writeque    equ   139               ; XDOS write queue
+  008D  =                       xdelay      equ   141               ; XDOS delay
+  0090  =                       create      equ   144               ; XDOS create process
+  0084  =                       flagwait    equ   132
+  0085  =                       flagset     equ   133
+  008E  =                       dsptch      equ   142
+                                
+                                
+  0000  =                       pldsk       equ   0                 ; poll CF 
+  0001  =                       plci0       equ   1                 ; poll console #0 input
+  0002  =                       plco0       equ   2                 ; poll console #0 output
+  0003  =                       plci1       equ   3                 ; poll console #1 input
+  0004  =                       plco1       equ   4                 ; poll console #1 output
+                                ;pllpt       equ   5                 ; poll LPT     
+                                
+                                            ; Console status
+  01B2' CD 01C7'                const:      call  ptbljmp           ; compute and jump to hndlr
+  01B5' 01D9'                               dw    pt0st             ; console #0 status routine
+  01B7' 020D'                               dw    pt1st             ; console #1 status routine
+                                
+                                            ; Read console character in
+  01B9' CD 01C7'                conin:      call  ptbljmp           ; compute and jump to hndlr
+  01BC' 01E2'                               dw    pt0in             ; console #0 input
+  01BE' 0216'                               dw    pt1in             ; console #1 input
+                                
+                                            ; Write console character out
+  01C0' CD 01C7'                conout:     call  ptbljmp           ; compute and jump to hndlr
+  01C3' 01EF'                               dw    pt0out            ; console #0 output
+  01C5' 0223'                               dw    pt1out            ; console #1 output
+                                
+  01C7' 7A                      ptbljmp:    ld    a,d               ; compute and jump to handler,
+  01C8' FE 02                               cp    numcns            ; d = console #, preserve it
+  01CA' 38 02                               jr    c,tbljmp
+                                ;           pop	af		; throw away table address (??)
+  01CC' AF                      rtnempty:   xor   a
+  01CD' C9                                  ret
+  01CE' 87                      tbljmp:     add   a,a
+  01CF' E1                                  pop   hl
+  01D0' 5F                                  ld    e,a
+  01D1' 16 00                               ld    d,0
+  01D3' 19                                  add   hl,de
+  01D4' 5E                                  ld    e,(hl)
+  01D5' 23                                  inc   hl
+  01D6' 56                                  ld    d,(hl)
+  01D7' EB                                  ex    de,hl
+ZSM 4.4	Source file: XIOS     	14-Apr-2022  15:11:33	Page    8
+MP/M-II Banked XIOS for RC2014
+
+  01D8' E9                                  jp    (hl)              ; jump to computed cns handler
+                                
+                                ; -----------------------------------------------------------------------------
+                                ;	C O N S O L E   0
+                                
+  01D9'                         polci0:
+  01D9' ED 38 C4                pt0st:      in0   a,(STAT0)         ; Console status
+  01DC' E6 80                               and   80h               ; Receive register (ST_RDRF) full?
+  01DE' C8                                  ret   z
+  01DF' 3E FF                               ld    a,0FFh
+  01E1' C9                                  ret
+                                
+  01E2' 0E 83                   pt0in:      ld    c,poll
+  01E4' 1E 01                               ld    e,plci0
+  01E6' CD 0057'                            call  xdos              ; poll console #0 input
+  01E9' ED 38 C8                            in0   a,(RDR0)
+  01EC' E6 7F                               and   7Fh
+  01EE' C9                                  ret
+                                
+  01EF' ED 38 C4                pt0out:     in0   a,(STAT0)         ; console output
+  01F2' CB 4F                               bit   ST_TDRE,a         ; tx ready?
+  01F4' 20 09                               jr    nz,tx0rdy
+  01F6' C5                                  push  bc
+  01F7' 0E 83                               ld    c,poll
+  01F9' 1E 02                               ld    e,plco0
+  01FB' CD 0057'                            call  xdos              ; poll console #0 output
+  01FE' C1                                  pop   bc
+  01FF' 79                      tx0rdy:     ld    a,c
+  0200' ED 39 C6                            out0  (TDR0),a          ; send it
+  0203' C9                                  ret
+                                
+  0204' ED 38 C4                polco0:     in0   a,(STAT0)         ; Read UART status register of COM port 0.
+  0207' E6 02                               and   02h               ; tx (ST_TDRE) ready?
+  0209' C8                                  ret   z
+  020A' 3E FF                               ld    a,0FFh
+  020C' C9                                  ret
+                                ; -----------------------------------------------------------------------------
+                                ;	C O N S O L E   1
+                                
+  020D'                         polci1:
+  020D' ED 38 C5                pt1st:      in0   a,(STAT1)         ; Console status
+  0210' E6 80                               and   80h               ; Receive register (ST_RDRF) full?
+  0212' C8                                  ret   z                 ; 00h - not ready
+  0213' 3E FF                               ld    a,0FFh            ; FFh - ready
+  0215' C9                                  ret
+                                
+  0216' 0E 83                   pt1in:      ld    c,poll
+  0218' 1E 03                               ld    e,plci1
+  021A' CD 0057'                            call  xdos              ; poll console #1 input
+  021D' ED 38 C9                            in0   a,(RDR1)
+  0220' E6 7F                               and   7Fh
+  0222' C9                                  ret
+                                
+  0223' ED 38 C5                pt1out:     in0   a,(STAT1)         ; console output
+  0226' CB 4F                               bit   ST_TDRE,a         ; Test TX Data Register Empty ready bit and
+  0228' 20 09                               jr    nz,tx1rdy
+  022A' C5                                  push  bc
+ZSM 4.4	Source file: XIOS     	14-Apr-2022  15:11:33	Page    9
+MP/M-II Banked XIOS for RC2014
+
+  022B' 0E 83                               ld    c,poll
+  022D' 1E 04                               ld    e,plco1
+  022F' CD 0057'                            call  xdos              ; poll console #1 output
+  0232' C1                                  pop   bc
+  0233' 79                      tx1rdy:     ld    a,c
+  0234' ED 39 C7                            out0  (TDR1),a          ; send it
+  0237' C9                                  ret
+                                
+  0238' ED 38 C5                polco1:     in0   a,(STAT1)         ; Read UART status register of COM port 1.
+  023B' E6 02                               and   02h               ; tx (ST_TDRE) ready?
+  023D' C8                                  ret   z
+  023E' 3E FF                               ld    a,0FFh
+  0240' C9                                  ret
+                                
+                                ; -----------------------------------------------------------------------------
+                                ;	L I S T   D E V I C E  (in progress)
+                                
+                                ;pollpt:
+  0241' AF                      listst:     xor   a
+  0242' C9                                  ret                     ; 00h - not ready
+                                
+                                ; Output C on Printer
+  0243'                         list:
+  0243' CD 0241'                lptout:     call  listst            ; Busy?
+  0246' 20 00                               jr    nz,lptrdy         ; Go if ready
+                                ;            push  bc
+                                ;            ld    c,poll
+                                ;            ld    e,pllpt
+                                ;            call  xdos
+                                ;            pop   bc
+  0248'                         lptrdy:
+  0248' ED 09 4C                            out0  (PIOAD),c         ; Latch data
+  024B' C9                                  ret
+                                
+                                ; -----------------------------------------------------------------------------
+                                ; Maximum Console Number
+  024C' 3E 02                   maxconsole: ld    a,numcns
+  024E' C9                                  ret
+                                
+                                ; -----------------------------------------------------------------------------
+                                ; Reg C = device # to be polled
+                                ;	 return 0ffh if ready, 000h if not
+  024F' 79                      polldevice: ld    a,c
+  0250' FE 05                               cp    numdev
+  0252' 38 02                               jr    c,devok
+  0254' 3E 05                               ld    a,numdev
+                                
+  0256' CD 01CE'                devok:      call  tbljmp            ; jump to dev poll code
+                                
+  0259' 0265'                   devtbl:     dw    poldsk
+  025B' 01D9'                               dw    polci0
+  025D' 0204'                               dw    polco0
+  025F' 020D'                               dw    polci1
+  0261' 0238'                               dw    polco1
+  0005  =                       numdev      equ   ($-devtbl)/2
+  0263' 01CC'                               dw    rtnempty
+                                
+ZSM 4.4	Source file: XIOS     	14-Apr-2022  15:11:33	Page   10
+MP/M-II Banked XIOS for RC2014
+
+                                ; -----------------------------------------------------------------------------
+                                ; -----------------------------------------------------------------------------
+                                ; Poll CF Disk
+  0265' DB 17                   poldsk:     in    a,(CF_STATUS)     ;Read status register 
+  0267' E6 80                               and   80h               ; A[7] (Busy)
+  0269' EE 80                               xor   80h
+  026B' C8                                  ret   z
+  026C' 3E FF                               ld    a,0FFh
+  026E' C9                                  ret
+                                
+                                ; -----------------------------------------------------------------------------
+                                ;       B A N K   S W I T C H I N G
+                                ;    adr of mem descriptor = BC ----> base   1 byte,
+  026F' 03                      selmemory:  inc   bc                ; size   1 byte,
+  0270' 03                                  inc   bc                ; attrib 1 byte,
+  0271' 03                                  inc   bc                ; bank   1 byte.
+  0272' 0A                                  ld    a,(bc)
+  0273' E6 07                   selbank:    and   7                 ; bank number
+  0275' F6 08                               or    8                 ; + base adrr (80h)>>4
+  0277' 17                                  rla 
+  0278' 17                                  rla
+  0279' 17                                  rla
+  027A' 17                                  rla
+  027B' ED 39 F9                            out0  (bbr),a
+  027E' C9                                  ret
+                                
+                                ; -----------------------------------------------------------------------------
+  027F' 3E FF                   startclock: ld    a,0FFh            ; will cause flag #1 to be set
+  0281' 32 0521'                            ld    (tickn),a         ; at each system time unit tick
+  0284' C9                                  ret
+                                
+  0285' AF                      stopclock:  xor   a                 ; will stop flag #1 setting at
+  0286' 32 0521'                            ld    (tickn),a         ; system time unit tick
+  0289' C9                                  ret
+                                
+  028A' 3A 0522'                exitregion: ld    a,(preemp)
+  028D' B7                                  or    a
+  028E' C0                                  ret   nz
+  028F' FB                                  ei                      ; EI if not preempted or in dispatcher
+  0290' C9                                  ret
+                                
+                                ; -----------------------------------------------------------------------------
+                                ;	I N T E R R U P T   H A N D L E R S
+                                ;     code by Hector Peraza
+                                ; -----------------------------------------------------------------------------
+                                
+  0032  =                       tickspsec   equ   50
+  4800  =                       reload      equ   18432             ; CPU freq/1000
+                                
+  0291' F3                      timerint:   di
+  0292' ED 73 051F'                         ld    (savsp),sp
+  0296' 31 051F'                            ld    sp,lstintstk      ; local stack for intr hndl
+  0299' F5                                  push  af
+  029A' E5                                  push  hl
+  029B' D5                                  push  de
+  029C' C5                                  push  bc
+  029D' DD E5                               push  ix
+ZSM 4.4	Source file: XIOS     	14-Apr-2022  15:11:33	Page   11
+MP/M-II Banked XIOS for RC2014
+
+  029F' FD E5                               push  iy
+  02A1' 3E FF                               ld    a,0FFh
+  02A3' 32 0522'                            ld    (preemp),a
+  02A6' ED 38 D0                            in0   a,(tcr)
+  02A9' ED 38 CC                            in0   a,(tmdr0l)
+  02AC' ED 38 CD                            in0   a,(tmdr0h)
+  02AF' 3A 0521'                            ld    a,(tickn)         ; test tickn, indicates delayed processes
+  02B2' B7                                  or    a
+  02B3' 28 07                               jr    z,notickn
+  02B5' 0E 85                               ld    c,flagset
+  02B7' 1E 01                               ld    e,1
+  02B9' CD 0057'                            call  xdos              ; set flag #1 each tick
+                                
+  02BC' 21 04F5'                notickn:    ld    hl,cnt1sec
+  02BF' 35                                  dec   (hl)
+  02C0' 20 09                               jr    nz,intdone
+  02C2' 36 32                               ld    (hl),tickspsec
+  02C4' 0E 85                               ld    c,flagset
+  02C6' 1E 02                               ld    e,2
+  02C8' CD 0057'                            call  xdos              ; set flag #2 @ 1 sec
+                                
+  02CB' AF                      intdone:    xor   a
+  02CC' 32 0522'                            ld    (preemp),a        ; clear preempted flag
+  02CF' FD E1                               pop   iy
+  02D1' DD E1                               pop   ix
+  02D3' C1                                  pop   bc
+  02D4' D1                                  pop   de
+  02D5' E1                                  pop   hl
+  02D6' F1                                  pop   af
+  02D7' ED 7B 051F'                         ld    sp,(savsp)
+  02DB' C3 0054'                            jp    pdisp             ; dispatch
+                                
+  02DE' F3                      badint:     di
+  02DF' 31 051F'                            ld    sp,lstintstk
+  02E2' 3E FF                               ld    a,0FFh
+  02E4' 32 0522'                            ld    (preemp),a
+  02E7' 21 02EF'                            ld    hl,bintm
+  02EA' CD 01A4'                            call  putmsg
+  02ED' F3                                  di
+  02EE' 76                                  halt
+                                
+  02EF' 42 61 64 49 6E 74       bintm:      db    "BadInt",0
+  02F5' 00                      
+                                
+                                ;==============================================================================
+                                ;	D I S K - M A N A G E M E N T   F U N C T I O N S
+                                
+  02F6' 3A 15C3'                home:       ld    a,(hstwrt)        ; check for pending write
+  02F9' B7                                  or    a
+  02FA' 20 03                               jr    nz,homed
+  02FC' 32 15C2'                            ld    (hstact),a        ; clear host active flag
+  02FF' 01 0000                 homed:      ld    bc,0000h
+                                ; -----------------------------------------------------------------------------
+  0302' ED 43 15B9'             settrk:     ld    (sektrk),bc       ; Set track passed from BDOS in register BC.
+  0306' C9                                  ret
+                                ; -----------------------------------------------------------------------------
+                                ; Save Sector Number Passed in Reg C.
+ZSM 4.4	Source file: XIOS     	14-Apr-2022  15:11:33	Page   12
+MP/M-II Banked XIOS for RC2014
+
+                                
+  0307' ED 43 15BB'             setsec:     ld    (seksec),bc       ; Set sector passed from BDOS in register BC.
+  030B' C9                                  ret
+                                ; -----------------------------------------------------------------------------
+                                
+                                ; Translate Sector (BC), using table at (DE)
+                                
+  030C' C5                      sectran:    push  bc
+  030D' E1                                  pop   hl                ; Null routine: just BC => HL
+  030E' C9                                  ret
+                                ; -----------------------------------------------------------------------------
+                                
+  030F' ED 43 15CD'             setdma:     ld    (dmaadr),bc       ; Buffer addr. in BC
+  0313' C9                                  ret
+                                ; -----------------------------------------------------------------------------
+  0314' 21 0000                 seldsk:     ld    hl,0000h          ; Select drive (C): DPH ptr. in HL
+  0317' 79                                  ld    a,c
+  0318' FE 10                               cp    16                ; 16 for 128MB disk
+  031A' 38 0D                               jr    c,chgdsk          ; if invalid drive will give BDOS error
+  031C' 3A 0523'                            ld    a,(userdrv)       ; so set the drive back to a:
+  031F' B9                                  cp    c                 ; If the default disk is not the same as the
+  0320' C0                                  ret   nz                ; selected drive then return, 
+  0321' AF                                  xor   a                 ; else reset default back to a:
+  0322' 32 0523'                            ld    (userdrv),a       ; otherwise will be stuck in a loop
+  0325' 32 15B8'                            ld    (sekdsk),a
+  0328' C9                                  ret
+                                ; -----------------------------------------------------------------------------
+  0329' 32 15B8'                chgdsk:     ld    (sekdsk),a
+  032C' CB 07                               rlc   a                 ;*2
+  032E' CB 07                               rlc   a                 ;*4
+  0330' CB 07                               rlc   a                 ;*8
+  0332' CB 07                               rlc   a                 ;*16
+  0334' 21 0077'                            ld    hl,dpbase
+  0337' 06 00                               ld    b,0
+  0339' 4F                                  ld    c,a 
+  033A' 09                                  add   hl,bc             ; hl is the new DPB address
+  033B' C9                                  ret
+                                
+                                ;------------------------------------------------------------------------------
+                                            ;read the selected MP/M sector
+  033C' AF                      read:       xor   a
+  033D' 32 15C4'                            ld    (unacnt),a        ;unacnt = 0
+  0340' 3C                                  inc   a
+  0341' 32 15CB'                            ld    (readop),a        ;read operation
+  0344' 32 15CA'                            ld    (rsflag),a        ;must read data
+  0347' 3E 02                               ld    a,wrual
+  0349' 32 15CC'                            ld    (wrtype),a        ;treat as unalloc
+  034C' C3 03B6'                            jp    rwoper            ;to perform the read
+                                ;------------------------------------------------------------------------------
+                                            ;write the selected MP/M sector
+  034F' AF                      write:      xor   a                 ;0 to accumulator
+  0350' 32 15CB'                            ld    (readop),a        ;not a read operation
+  0353' 79                                  ld    a,c               ;write type in c
+  0354' 32 15CC'                            ld    (wrtype),a
+  0357' FE 02                               cp    wrual             ;write unallocated?
+  0359' 20 17                               jr    nz,chkuna         ;check for unalloc
+                                ;
+ZSM 4.4	Source file: XIOS     	14-Apr-2022  15:11:33	Page   13
+MP/M-II Banked XIOS for RC2014
+
+                                ;                             write to unallocated, set parameters
+  035B' 3E 20                               ld    a,blksiz/128      ;next unalloc recs
+  035D' 32 15C4'                            ld    (unacnt),a
+  0360' 3A 15B8'                            ld    a,(sekdsk)        ;disk to seek
+  0363' 32 15C5'                            ld    (unadsk),a        ;unadsk = sekdsk
+  0366' 2A 15B9'                            ld    hl,(sektrk)
+  0369' 22 15C6'                            ld    (unatrk),hl       ;unatrk = sectrk
+  036C' 3A 15BB'                            ld    a,(seksec)
+  036F' 32 15C8'                            ld    (unasec),a        ;unasec = seksec
+                                ;
+                                ;                             check for write to unallocated sector
+  0372' 3A 15C4'                chkuna:     ld    a,(unacnt)        ;any unalloc remain?
+  0375' B7                                  or    a
+  0376' 28 36                               jr    z,alloc           ;skip if not
+                                ;
+                                ;                             more unallocated records remain
+  0378' 3D                                  dec   a                 ;unacnt = unacnt-1
+  0379' 32 15C4'                            ld    (unacnt),a
+  037C' 3A 15B8'                            ld    a,(sekdsk)        ;same disk?
+  037F' 21 15C5'                            ld    hl,unadsk
+  0382' BE                                  cp    (hl)              ;sekdsk = unadsk?
+  0383' C2 03AE'                            jp    nz,alloc          ;skip if not
+                                ;
+                                ;                             disks are the same
+  0386' 21 15C6'                            ld    hl,unatrk
+  0389' CD 0450'                            call  sektrkcmp      ;sektrk = unatrk?
+  038C' C2 03AE'                            jp    nz,alloc         ;skip if not
+                                ;
+                                ;                             tracks are the same
+  038F' 3A 15BB'                            ld    a,(seksec)        ;same sector?
+  0392' 21 15C8'                            ld    hl,unasec
+  0395' BE                                  cp    (hl)              ;seksec = unasec?
+  0396' C2 03AE'                            jp    nz,alloc          ;skip if not
+                                ;
+                                ;                             match, move to next sector for future ref
+  0399' 34                                  inc   (hl)              ;unasec = unasec+1
+  039A' 7E                                  ld    a,(hl)            ; end of track?
+  039B' FE 80                               cp    cpmspt            ;count CP/M sectors
+  039D' 38 09                               jr    c,noovf           ;skip if no overflow
+                                ;
+                                ;                             overflow to next track
+  039F' 36 00                               ld    (hl),0            ;unasec = 0
+  03A1' 2A 15C6'                            ld    hl,(unatrk)
+  03A4' 23                                  inc   hl
+  03A5' 22 15C6'                            ld    (unatrk),hl      ;unatrk = unatrk+1
+                                ;
+                                            ;match found, mark as unnecessary read
+  03A8' AF                      noovf:      xor   a                 ;0 to accumulator
+  03A9' 32 15CA'                            ld    (rsflag),a        ;rsflag = 0
+  03AC' 18 08                               jr    rwoper            ;to perform the write
+                                ;
+                                            ;not an unallocated record, requires pre-read
+  03AE' AF                      alloc:      xor   a                 ;0 to accum
+  03AF' 32 15C4'                            ld    (unacnt),a        ;unacnt = 0
+  03B2' 3C                                  inc   a                 ;1 to accum
+  03B3' 32 15CA'                            ld    (rsflag),a        ;rsflag = 1
+                                
+ZSM 4.4	Source file: XIOS     	14-Apr-2022  15:11:33	Page   14
+MP/M-II Banked XIOS for RC2014
+
+                                ;------------------------------------------------------------------------------
+                                            ;enter here to perform the read/write
+  03B6' AF                      rwoper:     xor   a                 ;zero to accum
+  03B7' 32 15C9'                            ld    (erflag),a        ;no errors (yet)
+  03BA' 3A 15BB'                            ld    a,(seksec)        ;compute host sector
+  03BD' B7                                  or    a                 ;carry = 0
+  03BE' 1F                                  rra                     ;shift right
+  03BF' B7                                  or   a                  ;carry = 0
+  03C0' 1F                                  rra                     ;shift right
+  03C1' 32 15C1'                            ld    (sekhst),a        ;host sector to seek
+                                ;
+                                ;                             active host sector?
+  03C4' 21 15C2'                            ld    hl,hstact         ;host active flag
+  03C7' 7E                                  ld    a,(hl)
+  03C8' 36 01                               ld    (hl),1            ;always becomes 1
+  03CA' B7                                  or    a                 ;was it already?
+  03CB' 28 21                               jr    z,filhst          ; fill host if not
+                                ;
+                                ;                             host buffer active, same as seek buffer?
+  03CD' 3A 15B8'                            ld    a,(sekdsk)
+  03D0' 21 15BD'                            ld    hl,hstdsk         ;same disk?
+  03D3' BE                                  cp    (hl)              ;sekdsk = hstdsk?
+  03D4' 20 11                               jr    nz,nomatch
+                                ;
+                                ;                             same disk, same track?
+  03D6' 21 15BE'                            ld    hl,hsttrk
+  03D9' CD 0450'                            call  sektrkcmp         ;sektrk = hsttrk?
+  03DC' 20 09                               jr    nz,nomatch
+                                ;
+                                ;                             same disk, same track, same buffer?
+  03DE' 3A 15C1'                            ld    a,(sekhst)
+  03E1' 21 15C0'                            ld    hl,hstsec         ;sekhst = hstsec?
+  03E4' BE                                  cp    (hl)
+  03E5' 28 24                               jr    z,match           ;skip if match
+                                            ;     proper disk, but not correct sector
+  03E7' 3A 15C3'                nomatch:    ld    a,(hstwrt)        ;host written?
+  03EA' B7                                  or    a
+  03EB' C4 04C2'                            call  nz,writehst       ;clear host buff
+                                            ;     may have to fill the host buffer
+  03EE' 3A 15B8'                filhst:     ld    a,(sekdsk)
+  03F1' 32 15BD'                            ld    (hstdsk),a
+  03F4' 2A 15B9'                            ld    hl,(sektrk)
+  03F7' 22 15BE'                            ld    (hsttrk),hl
+  03FA' 3A 15C1'                            ld    a,(sekhst)
+  03FD' 32 15C0'                            ld    (hstsec),a
+  0400' 3A 15CA'                            ld    a,(rsflag)        ;need to read?
+  0403' B7                                  or    a
+  0404' C4 049F'                            call  nz,readhst        ;yes, if 1
+  0407' AF                                  xor   a                 ;0 to accum
+  0408' 32 15C3'                            ld    (hstwrt),a        ;no pending write
+                                            ;     copy data to or from buffer
+  040B' 3A 15BB'                match:      ld    a,(seksec)        ;mask buffer number
+  040E' E6 03                               and   secmsk            ;least signif bits
+  0410' 67                                  ld    h,a
+  0411' 2E 80                               ld    l,128
+  0413' ED 6C                               mlt   hl
+                                ;                             hl has relative host buffer address
+ZSM 4.4	Source file: XIOS     	14-Apr-2022  15:11:33	Page   15
+MP/M-II Banked XIOS for RC2014
+
+  0415' 11 15CF'                            ld    de,hstbuf
+  0418' 19                                  add   hl,de             ;hl = host address
+  0419' ED 5B 15CD'                         ld    de,(dmaadr)       ;get/put MP/M data
+  041D' 3A 15CB'                            ld    a,(readop)        ;which way?
+  0420' B7                                  or    a
+  0421' 20 06                               jr    nz,rwmove         ;skip if read
+                                ;
+                                ;           write operation, mark and switch direction
+  0423' 3E 01                               ld    a,1
+  0425' 32 15C3'                            ld    (hstwrt),a        ;hstwrt = 1
+  0428' EB                                  ex    de,hl             ;source/dest swap
+                                ;
+                                            ;BC initially 128, HL is source, DE is dest
+  0429' D5                      rwmove:     push  de
+  042A' E5                                  push  hl
+                                
+  042B' CD 004E'                            call  swtuser           ;switch to user context
+  042E' F3                                  di                      ;disable int
+  042F' E1                                  pop   hl
+  0430' D1                                  pop   de
+  0431' 01 0080                             ld    bc, 128           ;length of move 
+  0434' FB                                  ei           
+  0435' ED B0                               ldir
+  0437' CD 0051'                            call  swtsys            ;back to system context
+                                ;
+                                ;                             data has been moved to/from host buffer
+  043A' 3A 15CC'                            ld    a,(wrtype)        ;write type
+  043D' FE 01                               cp    wrdir             ;to directory?
+  043F' 3A 15C9'                            ld    a,(erflag)        ;in case of errors
+  0442' C0                                  ret   nz                ;no further processing
+                                ;
+                                ;                             clear host buffer for directory write
+  0443' B7                                  or    a                 ;errors?
+  0444' C0                                  ret   nz                ;skip if so
+  0445' AF                                  xor   a                 ;0 to accum
+  0446' 32 15C3'                            ld    (hstwrt),a        ;buffer written
+  0449' CD 04C2'                            call  writehst
+  044C' 3A 15C9'                            ld    a,(erflag)
+  044F' C9                                  ret
+                                
+                                ;------------------------------------------------------------------------------
+                                ;Utility subroutine for 16-bit compare
+  0450'                         sektrkcmp:
+                                            ;HL = .unatrk or .hsttrk, compare with sektrk
+  0450' EB                                  ex    de,hl
+  0451' 21 15B9'                            ld    hl,sektrk
+  0454' 1A                                  ld    a,(de)            ;low byte compare
+  0455' BE                                  cp    (hl)              ;same?
+  0456' C0                                  ret   nz                ;return if not
+                                ;                             low bytes equal, test high 1s
+  0457' 13                                  inc   de
+  0458' 23                                  inc   hl
+  0459' 1A                                  ld    a,(de)
+  045A' BE                                  cp    (hl)              ;sets flags
+  045B' C9                                  ret
+                                
+                                ;==============================================================================
+ZSM 4.4	Source file: XIOS     	14-Apr-2022  15:11:33	Page   16
+MP/M-II Banked XIOS for RC2014
+
+                                ; Convert track/head/sector into LBA for physical access to the disk
+                                ; 00Vvvvvv|vvTttttt|tttsssss   some serious bitshifting ahead
+                                ; code by Rienk H. Koolstra
+                                ;==============================================================================
+  045C' 2A 15BE'                SetLBAadr:  ld    hl,(hsttrk)       ; 0000000T tttttttt
+  045F' 7D                                  ld    a,l               ; tttttttt
+  0460' E6 07                               and   07h               ; 00000ttt
+  0462' 0F                                  rrca                    ; t00000tt
+  0463' 0F                                  rrca                    ; tt00000t
+  0464' 0F                                  rrca                    ; ttt00000
+  0465' 47                                  ld    b,a
+  0466' 3A 15C0'                            ld    a,(hstsec)        ; 000sssss
+  0469' B0                                  or    b                 ; tttsssss
+  046A' 32 15B4'                            ld    (lba0),a
+                                
+  046D' 7D                                  ld    a,l               ; tttttttt
+  046E' E6 F8                               and   0F8h              ; ttttt000
+  0470' B4                                  or    h                 ; ttttt00T
+  0471' 0F                                  rrca                    ; Tttttt00
+  0472' 0F                                  rrca                    ; 0Tttttt0
+  0473' 0F                                  rrca                    ; 00Tttttt
+  0474' 47                                  ld    b,a
+  0475' 3A 15BD'                            ld    a,(hstdsk)        ; Vvvvvvvv (V is used for the 128+ diskset)
+  0478' 0F                                  rrca                    ; vVvvvvvv
+  0479' 0F                                  rrca                    ; vvVvvvvv
+  047A' 4F                                  ld    c,a
+  047B' E6 C0                               and   0C0h              ; vv000000
+  047D' B0                                  or    b                 ; vvTttttt
+  047E' 32 15B5'                            ld    (lba1),a
+                                
+  0481' 79                                  ld    a,c               ; vvVvvvvv
+  0482' E6 3F                               and   3Fh               ; 00Vvvvvv
+  0484' 32 15B6'                            ld    (lba2),a
+  0487' 3E E0                               ld    a,0E0h            ; LBA Mode using drive 0 = E0
+  0489' 32 15B7'                            ld    (lba3),a
+                                
+  048C' 0E 13                               ld    c,CF_LBA0         ; first LBA port
+  048E' 21 15B4'                            ld    hl,lba0           ; set first LBA
+  0491' 06 04                               ld    b,4               ; 4 to go
+  0493' ED A3                   sl1:        outi                    ; output and increment HL
+  0495' 28 03                               jr    z,sl2             ; if all 4 done, exit
+  0497' 0C                                  inc   c                 ; next LBA Port
+  0498' 18 F9                               jr    sl1               ; output next LBA
+                                
+  049A' 3E 01                   sl2:        ld    a,1
+  049C' D3 12                               out   (CF_SECCOUNT),a
+                                
+  049E' C9                                  ret    
+                                
+                                ;==============================================================================
+                                ; Read physical sector from host
+                                ;==============================================================================
+                                
+  049F' F5                      readhst:    push   af
+  04A0' C5                                  push   bc
+  04A1' E5                                  push   hl
+                                
+ZSM 4.4	Source file: XIOS     	14-Apr-2022  15:11:33	Page   17
+MP/M-II Banked XIOS for RC2014
+
+  04A2' CD 04E5'                            call  cfWait
+  04A5' CD 045C'                            call  SetLBAadr
+                                
+  04A8' 3E 20                               ld    a,CF_READ_SEC
+  04AA' D3 17                               out   (CF_COMMAND),a
+                                
+  04AC' CD 04E5'                            call  cfWait
+  04AF' 21 15CF'                            ld    hl,hstbuf
+  04B2' 06 00                               ld    b,0
+  04B4' 0E 10                               ld    c,CF_DATA
+  04B6' ED B2                               inir                    ; input 256 bytes
+  04B8' ED B2                               inir                    ; and another 256
+                                
+  04BA' E1                                  pop   hl
+  04BB' C1                                  pop   bc
+  04BC' F1                                  pop   af
+                                
+  04BD' AF                                  xor   a
+  04BE' 32 15C9'                            ld    (erflag),a
+  04C1' C9                                  ret
+                                
+                                ;==============================================================================
+                                ; Write physical sector to host
+                                ;==============================================================================
+                                
+  04C2' F5                      writehst:   push  af
+  04C3' C5                                  push  bc
+  04C4' E5                                  push  hl
+                                
+  04C5' CD 04E5'                            call  cfWait
+  04C8' CD 045C'                            call  SetLBAadr
+                                
+  04CB' 3E 30                               ld    a,CF_WRITE_SEC
+  04CD' D3 17                               out   (CF_COMMAND),a
+                                
+  04CF' CD 04E5'                            call  cfWait
+  04D2' 21 15CF'                            ld    hl,hstbuf
+  04D5' 06 00                               ld    b,0
+  04D7' 0E 10                               ld    c,CF_DATA
+  04D9' ED B3                               otir                    ; output 256 bytes
+  04DB' ED B3                               otir                    ; and another 256
+                                
+  04DD' E1                                  pop   hl
+  04DE' C1                                  pop   bc
+  04DF' F1                                  pop   af
+                                
+  04E0' AF                                  xor   a
+  04E1' 32 15C9'                            ld    (erflag),a
+  04E4' C9                                  ret
+                                
+                                ;==============================================================================
+                                ; Wait for disk to be ready (busy=0,ready=1)
+                                ;==============================================================================
+                                
+  04E5' F5                      cfWait:     push  af
+  04E6' DB 17                               in    a,(CF_STATUS)     ;Read status register
+  04E8' CB 7F                               bit   7,a               ;Test Busy flag
+ZSM 4.4	Source file: XIOS     	14-Apr-2022  15:11:33	Page   18
+MP/M-II Banked XIOS for RC2014
+
+  04EA' 28 07                               jr    z, cfReady
+                                            ; High so busy
+  04EC' 0E 83                               ld    c,poll
+  04EE' 1E 00                               ld    e,pldsk
+  04F0' CD 0057'                            call  xdos              ; poll CF disk
+                                
+  04F3' F1                      cfReady:    pop   af
+  04F4' C9                                  ret
+                                
+                                ;==============================================================================
+                                ; Data storage
+                                ;==============================================================================
+                                
+  04F5' 32                      cnt1sec:    db    tickspsec         ; ticks per second counter
+                                
+  04F6' ( 0001 )                timdbg      ds    1                 ; Timer Debuger
+                                
+  04F7'                         intstk:                             ; local interrupt stack	
+  04F7' C7C7  C7C7  C7C7                    dw    0c7c7h,0c7c7h,0c7c7h,0c7c7h,0c7c7h
+  04FD' C7C7  C7C7              
+  0501' C7C7  C7C7  C7C7                    dw    0c7c7h,0c7c7h,0c7c7h,0c7c7h,0c7c7h
+  0507' C7C7  C7C7              
+  050B' C7C7  C7C7  C7C7                    dw    0c7c7h,0c7c7h,0c7c7h,0c7c7h,0c7c7h
+  0511' C7C7  C7C7              
+  0515' C7C7  C7C7  C7C7                    dw    0c7c7h,0c7c7h,0c7c7h,0c7c7h,0c7c7h
+  051B' C7C7  C7C7              
+  051F'                         lstintstk:        
+  051F' ( 0002 )                savsp:      ds    2                 ; saved SP during interrupts
+  0521' 00                      tickn:      db    0                 ; ticking boolean, true = delayed
+  0522' 00                      preemp:     db    0                 ; preempted boolean
+                                                  
+  0523' ( 0001 )                userdrv:    ds    1                 ; Boot-drive number
+                                
+  0524'                         localData:              ; XIOS workspace
+                                
+  0524' ( 0080 )                dirbuf:     ds    128               ;scratch directory area
+  05A4' ( 0101 )                alv00:      ds    257               ;allocation vector 0
+  06A5' ( 0101 )                alv01:      ds    257               ;allocation vector 1
+  07A6' ( 0101 )                alv02:      ds    257               ;allocation vector 2
+  08A7' ( 0101 )                alv03:      ds    257               ;allocation vector 3
+  09A8' ( 0101 )                alv04:      ds    257               ;allocation vector 4
+  0AA9' ( 0101 )                alv05:      ds    257               ;allocation vector 5
+  0BAA' ( 0101 )                alv06:      ds    257               ;allocation vector 6
+  0CAB' ( 0101 )                alv07:      ds    257               ;allocation vector 7
+  0DAC' ( 0101 )                alv08:      ds    257               ;allocation vector 8
+  0EAD' ( 0101 )                alv09:      ds    257               ;allocation vector 9
+  0FAE' ( 0101 )                alv10:      ds    257               ;allocation vector 10
+  10AF' ( 0101 )                alv11:      ds    257               ;allocation vector 11
+  11B0' ( 0101 )                alv12:      ds    257               ;allocation vector 12
+  12B1' ( 0101 )                alv13:      ds    257               ;allocation vector 13
+  13B2' ( 0101 )                alv14:      ds    257               ;allocation vector 14
+  14B3' ( 0101 )                alv15:      ds    257               ;allocation vector 15
+                                
+  15B4' 00                      lba0        db    00h
+  15B5' 00                      lba1        db    00h
+  15B6' 00                      lba2        db    00h
+  15B7' 00                      lba3        db    00h
+ZSM 4.4	Source file: XIOS     	14-Apr-2022  15:11:33	Page   19
+MP/M-II Banked XIOS for RC2014
+
+                                
+  15B8' ( 0001 )                sekdsk:     ds    1                 ;seek disk number
+  15B9' ( 0002 )                sektrk:     ds    2                 ;seek track number
+  15BB' ( 0002 )                seksec:     ds    2                 ;seek sector number
+                                ;
+  15BD' ( 0001 )                hstdsk:     ds    1                 ;host disk number
+  15BE' ( 0002 )                hsttrk:     ds    2                 ;host track number
+  15C0' ( 0001 )                hstsec:     ds    1                 ;host sector number
+                                ;
+  15C1' ( 0001 )                sekhst:     ds    1                 ;seek shr secshf
+  15C2' ( 0001 )                hstact:     ds    1                 ;host active flag
+  15C3' ( 0001 )                hstwrt:     ds    1                 ;host written flag
+                                ;
+  15C4' ( 0001 )                unacnt:     ds    1                 ;unalloc rec cnt
+  15C5' ( 0001 )                unadsk:     ds    1                 ;last unalloc disk
+  15C6' ( 0002 )                unatrk:     ds    2                 ;last unalloc track
+  15C8' ( 0001 )                unasec:     ds    1                 ;last unalloc sector
+                                ;
+  15C9' ( 0001 )                erflag:     ds    1                 ;error reporting
+  15CA' ( 0001 )                rsflag:     ds    1                 ;read sector flag
+  15CB' ( 0001 )                readop:     ds    1                 ;1 if read operation
+  15CC' ( 0001 )                wrtype:     ds    1                 ;write operation type
+  15CD' ( 0002 )                dmaadr:     ds    2                 ;last dma address
+  15CF' ( 0200 )                hstbuf:     ds    512               ;host buffer
+                                
+                                ; -----------------------------------------------------------------------------
+                                ; Cold-boot code, overlayed by local workspace above
+                                ; -----------------------------------------------------------------------------
+                                
+  0524' =                                   org   localData
+                                
+                                ;	B O O T S T R A P   F U N C T I O N S
+                                ; On entry: C, DE = Debuger (not used), HL = BIOS direct jump table address.
+                                ;
+  0524' AF                      systeminit: xor   a                 ; Cold Start
+  0525' 32 0523'                            ld    (userdrv),a       ; Start from the boot disk (Drive A:, User 0)
+  0528' 32 15C2'                            ld    (hstact),a        ; Host Buffer inactive
+  052B' 32 15C4'                            ld    (unacnt),a        ; unalloc. ctr. = 0
+                                ;
+  052E' 32 04F6'                            ld    (timdbg),a        ; Timer Debuger
+                                ;
+  0531' 21 0080                             ld    hl,tpabuf         ; Address of BIOS DMA buffer.
+  0534' 22 15CD'                            ld    (dmaadr),hl
+                                
+                                
+  0537' 21 0594'                            ld    hl,Welcome
+  053A' D5                                  push  de
+  053B' CD 01A4'                            call  PutMsg            ; Print welcome banner
+  053E' D1                                  pop   de
+                                
+  053F' F3                                  di
+  0540' AF                                  xor   a
+  0541' ED 39 D0                            out0  (tcr),a           ; disable ints and RPT downcounting
+  0544' 21 4800                             ld    hl,reload
+  0547' ED 29 CE                            out0  (rldr0l),l
+  054A' ED 21 CF                            out0  (rldr0h),h
+                                
+ZSM 4.4	Source file: XIOS     	14-Apr-2022  15:11:33	Page   20
+MP/M-II Banked XIOS for RC2014
+
+  054D' 3E 0F                               ld    a, 00001111b      ; Set output PIO PortA
+  054F' D3 4E                               out   (PIOAC), a
+                                ; init the Z180 int table (must begin on a 32-byte boundary)
+                                
+  0551' 21 0060'                            ld    hl,itbl
+  0554' 7D                                  ld    a,l
+  0555' ED 39 F3                            out0  (il),a            ; set Z180 low address
+  0558' 7C                                  ld    a,h               ; get page
+  0559' ED 47                               ld    i,a               ; to int register
+                                
+  055B' 3E 11                               ld    a,11h             ; trurn ints on and enable downcounting
+  055D' ED 39 D0                            out0  (tcr),a
+  0560' 3E 01                               ld    a,01h             ; activate INT0 and interrupts
+  0562' ED 39 F4                            out0  (itc),a
+                                
+                                ; initialize mmu
+                                ;    Common(0) not used
+                                ;    Bank      0x0000 to 0xAFFF -> 0x80000 to 0x8AFFF 
+                                ;    Common(1) 0xB000 to 0xFFFF -> 0x88000 to 0x8FFFF
+  0565' 3E B0                               ld    a, 0B0h           ; 44k bank
+  0567' ED 39 FA                            out0  (cbar),a
+  056A' 3E 80                               ld    a, 080h           ; base bank address 0x80000h
+  056C' ED 39 F9                            out0  (bbr),a
+                                
+                                ; initialize MP/M banks
+  056F' 21 0000                             ld    hl,0
+  0572' 11 0594'                            ld    de,Welcome        ; use the welcome message as storage area
+  0575' 01 0040                             ld    bc,64             ; copy the first 64 bytes (contains XIOS and
+  0578' ED B0                               ldir                    ; BDOS vectors, etc.)
+  057A' 3E 07                               ld    a,7
+  057C' F5                      inib2:      push  af
+  057D' CD 0273'                            call  selbank
+  0580' 21 0594'                            ld    hl,Welcome
+  0583' 11 0000                             ld    de,0
+  0586' 01 0040                             ld    bc,64
+  0589' ED B0                               ldir
+  058B' F1                                  pop   af
+  058C' 3D                                  dec   a
+  058D' 20 ED                               jr    nz,inib2
+  058F' CD 0273'                            call  selbank           ; switch bank 0 back in
+                                
+  0592' FB                                  ei
+  0593' C9                                  ret
+                                
+  0594' 0D 0A 42 61 6E 6B       Welcome:    db	CR,LF,"Banked XIOS v1.0 for RC2014 by T.Pycio 2021",CR,0
+  059A' 65 64 20 58 49 4F       
+  05A0' 53 20 76 31 2E 30       
+  05A6' 20 66 6F 72 20 52       
+  05AC' 43 32 30 31 34 20       
+  05B2' 62 79 20 54 2E 50       
+  05B8' 79 63 69 6F 20 32       
+  05BE' 30 32 31 0D 00          
+                                
+  0000  =                                   end
+
+Errors: 0
+ZSM 4.4	Source file: XIOS     	14-Apr-2022  15:11:33	Page   21
+
+Symbols:
+ALLOC ............ 03AE'  ALV00 ............ 05A4'  ALV01 ............ 06A5'
+ALV02 ............ 07A6'  ALV03 ............ 08A7'  ALV04 ............ 09A8'
+ALV05 ............ 0AA9'  ALV06 ............ 0BAA'  ALV07 ............ 0CAB'
+ALV08 ............ 0DAC'  ALV09 ............ 0EAD'  ALV10 ............ 0FAE'
+ALV11 ............ 10AF'  ALV12 ............ 11B0'  ALV13 ............ 12B1'
+ALV14 ............ 13B2'  ALV15 ............ 14B3'  BADINT ........... 02DE'
+BASEIO ........... 00C0   BBR .............. 00F9   BCR0H ............ 00E7 
+BCR0L ............ 00E6   BCR1H ............ 00EF   BCR1L ............ 00EE 
+BINTM ............ 02EF'  BLKSIZ ........... 1000   BRK0 ............. 00D2 
+BRK1 ............. 00D3   CBAR ............. 00FA   CBR .............. 00F8 
+CCR .............. 00DF   CFREADY .......... 04F3'  CFWAIT ........... 04E5'
+CF_8BIT .......... 0001   CF_COMMAND ....... 0017   CF_CYL_HI ........ 0015 
+CF_CYL_LOW ....... 0014   CF_DATA .......... 0010   CF_ERROR ......... 0011 
+CF_FEATURES ...... 0011   CF_HEAD .......... 0016   CF_LBA0 .......... 0013 
+CF_LBA1 .......... 0014   CF_LBA2 .......... 0015   CF_LBA3 .......... 0016 
+CF_NOCACHE ....... 0082   CF_READ_SEC ...... 0020   CF_SECCOUNT ...... 0012 
+CF_SECTOR ........ 0013   CF_SET_FEAT ...... 00EF   CF_STATUS ........ 0017 
+CF_WRITE_SEC ..... 0030   CHGDSK ........... 0329'  CHKUNA ........... 0372'
+CNT1SEC .......... 04F5'  CNTLA0 ........... 00C0   CNTLA1 ........... 00C1 
+CNTLB0 ........... 00C2   CNTLB1 ........... 00C3   CNTR ............. 00CA 
+COLDSTART ........ 0072'  COMMONBASE ....... 004B'  CONIN ............ 01B9'
+CONOUT ........... 01C0'  CONST ............ 01B2'  CPMSPT ........... 0080 
+CR ............... 000D   CREATE ........... 0090   DAR0B ............ 00E5 
+DAR0H ............ 00E4   DAR0L ............ 00E3   DCNTL ............ 00F2 
+DEBUG ............ 0000   DEVOK ............ 0256'  DEVTBL ........... 0259'
+DIRBUF ........... 0524'  DMAADR ........... 15CD'  DMODE ............ 00F1 
+DPB .............. 0186'  DPB0 ............. 0177'  DPBASE ........... 0077'
+DPBLAST .......... 0195'  DSPTCH ........... 008E   DSTAT ............ 00F0 
+ERFLAG ........... 15C9'  EXITREGION ....... 028A'  FALSE ............ 0000 
+FILHST ........... 03EE'  FLAGSET .......... 0085   FLAGWAIT ......... 0084 
+FRC .............. 00D8   HOME ............. 02F6'  HOMED ............ 02FF'
+HSTACT ........... 15C2'  HSTBLK ........... 0004   HSTBUF ........... 15CF'
+HSTDSK ........... 15BD'  HSTSEC ........... 15C0'  HSTSIZ ........... 0200 
+HSTSPT ........... 0020   HSTTRK ........... 15BE'  HSTWRT ........... 15C3'
+IAR1H ............ 00EC   IAR1L ............ 00EB   ICR .............. 00FF 
+IL ............... 00F3   INIB2 ............ 057C'  INTDONE .......... 02CB'
+INTSTK ........... 04F7'  ITBL ............. 0060'  ITC .............. 00F4 
+LBA0 ............. 15B4'  LBA1 ............. 15B5'  LBA2 ............. 15B6'
+LBA3 ............. 15B7'  LF ............... 000A   LIST ............. 0243'
+LISTST ........... 0241'  LOCALDATA ........ 0524'  LPTOUT ........... 0243'
+LPTRDY ........... 0248'  LSTINTSTK ........ 051F'  MAKEQUE .......... 0086 
+MAR1B ............ 00EA   MAR1H ............ 00E9   MAR1L ............ 00E8 
+MATCH ............ 040B'  MAXCONSOLE ....... 024C'  NOMATCH .......... 03E7'
+NOOVF ............ 03A8'  NOTICKN .......... 02BC'  NUMCNS ........... 0002 
+NUMDEV ........... 0005   OMCR ............. 00FE   PDISP ............ 0054'
+PIOAC ............ 004E   PIOAD ............ 004C   PIOBC ............ 004F 
+PIOBD ............ 004D   PLCI0 ............ 0001   PLCI1 ............ 0003 
+PLCO0 ............ 0002   PLCO1 ............ 0004   PLDSK ............ 0000 
+POLCI0 ........... 01D9'  POLCI1 ........... 020D'  POLCO0 ........... 0204'
+POLCO1 ........... 0238'  POLDSK ........... 0265'  POLL ............. 0083 
+POLLDEVICE ....... 024F'  PREEMP ........... 0522'  PT0IN ............ 01E2'
+PT0OUT ........... 01EF'  PT0ST ............ 01D9'  PT1IN ............ 0216'
+PT1OUT ........... 0223'  PT1ST ............ 020D'  PTBLJMP .......... 01C7'
+PUTMSG ........... 01A4'  RCR .............. 00F6   RDR0 ............. 00C8 
+RDR1 ............. 00C9   READ ............. 033C'  READHST .......... 049F'
+READOP ........... 15CB'  READQUE .......... 0089   RELOAD ........... 4800 
+RLDR0H ........... 00CF   RLDR0L ........... 00CE   RLDR1H ........... 00D7 
+ZSM 4.4	Source file: XIOS     	14-Apr-2022  15:11:33	Page   22
+
+RLDR1L ........... 00D6   RSFLAG ........... 15CA'  RTNEMPTY ......... 01CC'
+RWMOVE ........... 0429'  RWOPER ........... 03B6'  SAR0B ............ 00E2 
+SAR0H ............ 00E1   SAR0L ............ 00E0   SAVSP ............ 051F'
+SECMSK ........... 0003   SECTRAN .......... 030C'  SEKDSK ........... 15B8'
+SEKHST ........... 15C1'  SEKSEC ........... 15BB'  SEKTRK ........... 15B9'
+SEKTRKCMP ........ 0450'  SELBANK .......... 0273'  SELDSK ........... 0314'
+SELMEMORY ........ 026F'  SETDMA ........... 030F'  SETLBAADR ........ 045C'
+SETSEC ........... 0307'  SETTRK ........... 0302'  SL1 .............. 0493'
+SL2 .............. 049A'  STARTCLOCK ....... 027F'  STAT0 ............ 00C4 
+STAT1 ............ 00C5   STOPCLOCK ........ 0285'  ST_RDRF .......... 0007 
+ST_TDRE .......... 0001   SWTSYS ........... 0051'  SWTUSER .......... 004E'
+SYSDAT ........... 005A'  SYSTEMINIT ....... 0524'  TBLJMP ........... 01CE'
+TCR .............. 00D0   TDR0 ............. 00C6   TDR1 ............. 00C7 
+TICKN ............ 0521'  TICKSPSEC ........ 0032   TIMDBG ........... 04F6'
+TIMERINT ......... 0291'  TMDR0H ........... 00CD   TMDR0L ........... 00CC 
+TMDR1H ........... 00D5   TMDR1L ........... 00D4   TPABUF ........... 0080 
+TRDR ............. 00CB   TRUE ............. FFFF   TX0RDY ........... 01FF'
+TX1RDY ........... 0233'  UNACNT ........... 15C4'  UNADSK ........... 15C5'
+UNASEC ........... 15C8'  UNATRK ........... 15C6'  USERDRV .......... 0523'
+VASC0 ............ 000E   VASC1 ............ 0010   VCSIO ............ 000C 
+VDMA0 ............ 0008   VDMA1 ............ 000A   VINT1 ............ 0000 
+VINT2 ............ 0002   VPRT0 ............ 0004   VPRT1 ............ 0006 
+WARMSTART ........ 0072'  WBOOT ............ 0003'  WELCOME .......... 0594'
+WRALL ............ 0000   WRDIR ............ 0001   WRITE ............ 034F'
+WRITEHST ......... 04C2'  WRITEQUE ......... 008B   WRTYPE ........... 15CC'
+WRUAL ............ 0002   XDELAY ........... 008D   XDOS ............. 0057'
+XIOS ............. 0000'  
+

@@ -20,7 +20,8 @@
 ;  Revision History:                                              
 ;  Rev    Date         Author                Comments             
 ;  0.2    23-09-2021   Tadeusz Pycio         Created 
-;  1.0    04-12-2021   Tadeusz Pyvio         Public release              
+;  1.0    04-12-2021   Tadeusz Pycio         Public release     
+;  1.1    14-04-2022   Tadeusz Pycio         Rebuilding interrupts
 ;                                                                 
 ;******************************************************************************
 
@@ -171,16 +172,17 @@ dpbLast:    dw    128               ;SPT - sectors per track
             dw    0                 ;OFF - Reserved tracks
 
 ; -----------------------------------------------------------------------------
-; Output ASCII on console 0
+; output ASCII on console 0
 
-PutMsg:     ld    a,(hl)            ; Affects A, BC, HL
+PutMsg:     ld    a,(hl)            ; Affects A, C, HL
             and   a
             ret   z                 ; Zero terminates
-            ld    c,a
-            ld    d,0               ; console 0
-            push  hl
-            call  conout            ; Display 1 char.
-            pop   hl
+
+            ld    c,a               ; Display 1 char.
+conoutA:    in0   a,(STAT0)         ; console 0 status
+            bit   ST_TDRE,a         ; tx empty?
+            jr    z,conoutA         ; No, so keep waiting
+            out0  (TDR0),c          ; Write byte to serial port
             inc   hl
             jr    PutMsg
 
@@ -411,9 +413,9 @@ timerint:   di
             push  iy
             ld    a,0FFh
             ld    (preemp),a
-            in0   a,(tcr)
-            in0   a,(tmdr0l)
-            in0   a,(tmdr0h)
+            in0   a,(TCR)
+            in0   a,(TMDR0L)
+            in0   a,(TMDR0H)
             ld    a,(tickn)         ; test tickn, indicates delayed processes
             or    a
             jr    z,notickn
@@ -893,7 +895,21 @@ hstbuf:     ds    512               ;host buffer
 ;	B O O T S T R A P   F U N C T I O N S
 ; On entry: C, DE = Debuger (not used), HL = BIOS direct jump table address.
 ;
-systeminit: xor   a                 ; Cold Start
+systeminit: di                      ; Disable interrupts
+            xor   a
+            out0  (TCR),a           ; disable timer interrputs and RPT downcounting
+            out0  (STAT0),a         ; disable interrupts ASCI0
+            out0  (STAT1),a         ; disable interrupts ASCI1      
+; initialize mmu
+;    Common(0) not used
+;    Bank      0x0000 to 0xAFFF -> 0x80000 to 0x8AFFF 
+;    Common(1) 0xB000 to 0xFFFF -> 0x88000 to 0x8FFFF
+            ld    a, 0B0h           ; 44k bank
+            out0  (CBAR),a
+            ld    a, 080h           ; base bank address 0x80000h
+            out0  (BBR),a
+;
+            xor   a                 ; Cold Start
             ld    (userdrv),a       ; Start from the boot disk (Drive A:, User 0)
             ld    (hstact),a        ; Host Buffer inactive
             ld    (unacnt),a        ; unalloc. ctr. = 0
@@ -902,44 +918,9 @@ systeminit: xor   a                 ; Cold Start
 ;
             ld    hl,tpabuf         ; Address of BIOS DMA buffer.
             ld    (dmaadr),hl
-
-
+; welcome message
             ld    hl,Welcome
-            push  de
             call  PutMsg            ; Print welcome banner
-            pop   de
-
-            di
-            xor   a
-            out0  (tcr),a           ; disable ints and RPT downcounting
-            ld    hl,reload
-            out0  (rldr0l),l
-            out0  (rldr0h),h
-
-            ld    a, 00001111b      ; Set output PIO PortA
-            out   (PIOAC), a
-; init the Z180 int table (must begin on a 32-byte boundary)
-
-            ld    hl,itbl
-            ld    a,l
-            out0  (il),a            ; set Z180 low address
-            ld    a,h               ; get page
-            ld    i,a               ; to int register
-
-            ld    a,11h             ; trurn ints on and enable downcounting
-            out0  (tcr),a
-            ld    a,01h             ; activate INT0 and interrupts
-            out0  (itc),a
-
-; initialize mmu
-;    Common(0) not used
-;    Bank      0x0000 to 0xAFFF -> 0x80000 to 0x8AFFF 
-;    Common(1) 0xB000 to 0xFFFF -> 0x88000 to 0x8FFFF
-            ld    a, 0B0h           ; 44k bank
-            out0  (cbar),a
-            ld    a, 080h           ; base bank address 0x80000h
-            out0  (bbr),a
-
 ; initialize MP/M banks
             ld    hl,0
             ld    de,Welcome        ; use the welcome message as storage area
@@ -956,10 +937,27 @@ inib2:      push  af
             dec   a
             jr    nz,inib2
             call  selbank           ; switch bank 0 back in
+; init hardware
+            ld    hl,reload
+            out0  (RLDR0L),l
+            out0  (RLDR0H),h
 
+            ld    a, 00001111b      ; Set output PIO PortA
+            out   (PIOAC), a
+; init the Z180 int table (must begin on a 32-byte boundary)
+            ld    hl,itbl
+            ld    a,l
+            out0  (IL),a            ; set Z180 low address
+            ld    a,h               ; get page
+            ld    i,a               ; to int register
+
+            ld    a,11h             ; turn ints on and enable downcounting
+            out0  (TCR),a
+            ld    a,00h             ; activate external interrupts (default=disable)
+            out0  (ITC),a
             ei
             ret
 
-Welcome:    db	CR,LF,"Banked XIOS v1.0 for RC2014 by T.Pycio 2021",CR,0
+Welcome:    db	CR,LF,"Banked XIOS v1.1 for RC2014 by T.Pycio 2022",CR,0
 
             end
