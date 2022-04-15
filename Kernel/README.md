@@ -17,7 +17,8 @@ XDOS.SPR
 and if you need to include additional programs that are included in the /ADDON folder.
 
 When generating MPM.SYS using GENSYS.COM, specify:
-    Top page of operating system (FF) ?
+
+    Top page of operating system (FF) ?   
     Number of TMPs (system consoles) (#4) ? 2
     Number of Printers (#1) ?
     Breakpoint RST (06) ?
