@@ -266,8 +266,7 @@ pt0out:     in0   a,(STAT0)         ; console output
             ld    e,plco0
             call  xdos              ; poll console #0 output
             pop   bc
-tx0rdy:     ld    a,c
-            out0  (TDR0),a          ; send it
+tx0rdy:     out0  (TDR0),c          ; send it
             ret
 
 polco0:     in0   a,(STAT0)         ; Read UART status register of COM port 0.
@@ -300,8 +299,7 @@ pt1out:     in0   a,(STAT1)         ; console output
             ld    e,plco1
             call  xdos              ; poll console #1 output
             pop   bc
-tx1rdy:     ld    a,c
-            out0  (TDR1),a          ; send it
+tx1rdy:     out0  (TDR1),c          ; send it
             ret
 
 polco1:     in0   a,(STAT1)         ; Read UART status register of COM port 1.
@@ -473,8 +471,8 @@ setsec:     ld    (seksec),bc       ; Set sector passed from BDOS in register BC
 
 ; Translate Sector (BC), using table at (DE)
 
-sectran:    push  bc
-            pop   hl                ; Null routine: just BC => HL
+sectran:    ld    h,b
+            ld    l,c               ; Null routine: just BC => HL
             ret
 ; -----------------------------------------------------------------------------
 
@@ -747,8 +745,7 @@ sl2:        ld    a,1
 ; Read physical sector from host
 ;==============================================================================
 
-readhst:    push   af
-            push   bc
+readhst:    push   bc
             push   hl
 
             call  cfWait
@@ -766,7 +763,6 @@ readhst:    push   af
 
             pop   hl
             pop   bc
-            pop   af
 
             xor   a
             ld    (erflag),a
@@ -776,8 +772,7 @@ readhst:    push   af
 ; Write physical sector to host
 ;==============================================================================
 
-writehst:   push  af
-            push  bc
+writehst:   push  bc
             push  hl
 
             call  cfWait
@@ -795,7 +790,6 @@ writehst:   push  af
 
             pop   hl
             pop   bc
-            pop   af
 
             xor   a
             ld    (erflag),a
@@ -805,8 +799,7 @@ writehst:   push  af
 ; Wait for disk to be ready (busy=0,ready=1)
 ;==============================================================================
 
-cfWait:     push  af
-            in    a,(CF_STATUS)     ;Read status register
+cfWait:     in    a,(CF_STATUS)     ;Read status register
             bit   7,a               ;Test Busy flag
             jr    z, cfReady
             ; High so busy
@@ -814,8 +807,7 @@ cfWait:     push  af
             ld    e,pldsk
             call  xdos              ; poll CF disk
 
-cfReady:    pop   af
-            ret
+cfReady:    ret
 
 ;==============================================================================
 ; Data storage
@@ -926,7 +918,7 @@ systeminit: di                      ; Disable interrupts
             ld    de,Welcome        ; use the welcome message as storage area
             ld    bc,64             ; copy the first 64 bytes (contains XIOS and
             ldir                    ; BDOS vectors, etc.)
-            ld    a,7
+            ld    a,7               ; number of banks
 inib2:      push  af
             call  selbank
             ld    hl,Welcome
