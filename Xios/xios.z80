@@ -542,18 +542,18 @@ chkuna:     ld    a,(unacnt)        ;any unalloc remain?
             ld    a,(sekdsk)        ;same disk?
             ld    hl,unadsk
             cp    (hl)              ;sekdsk = unadsk?
-            jp    nz,alloc          ;skip if not
+            jr    nz,alloc          ;skip if not
 ;
 ;                             disks are the same
             ld    hl,unatrk
             call  sektrkcmp      ;sektrk = unatrk?
-            jp    nz,alloc         ;skip if not
+            jr    nz,alloc         ;skip if not
 ;
 ;                             tracks are the same
             ld    a,(seksec)        ;same sector?
             ld    hl,unasec
             cp    (hl)              ;seksec = unasec?
-            jp    nz,alloc          ;skip if not
+            jr    nz,alloc          ;skip if not
 ;
 ;                             match, move to next sector for future ref
             inc   (hl)              ;unasec = unasec+1
