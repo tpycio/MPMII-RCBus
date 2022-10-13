@@ -511,7 +511,7 @@ read:       xor   a
             ld    (rsflag),a        ;must read data
             ld    a,wrual
             ld    (wrtype),a        ;treat as unalloc
-            jp    rwoper            ;to perform the read
+            jr    rwoper            ;to perform the read
 ;------------------------------------------------------------------------------
             ;write the selected MP/M sector
 write:      xor   a                 ;0 to accumulator
@@ -632,8 +632,9 @@ filhst:     ld    a,(sekdsk)
 match:      ld    a,(seksec)        ;mask buffer number
             and   secmsk            ;least signif bits
             ld    h,a
-            ld    l,128
-            mlt   hl
+            ld    l,0
+            srl   h
+            rr    l                 ;HL = L << 7
 ;                             hl has relative host buffer address
             ld    de,hstbuf
             add   hl,de             ;hl = host address
@@ -745,10 +746,7 @@ sl2:        ld    a,1
 ; Read physical sector from host
 ;==============================================================================
 
-readhst:    push   bc
-            push   hl
-
-            call  cfWait
+readhst:    call  cfWait
             call  SetLBAadr
 
             ld    a,CF_READ_SEC
@@ -756,13 +754,9 @@ readhst:    push   bc
 
             call  cfWait
             ld    hl,hstbuf
-            ld    b,0
-            ld    c,CF_DATA
+            ld    bc,CF_DATA            
             inir                    ; input 256 bytes
             inir                    ; and another 256
-
-            pop   hl
-            pop   bc
 
             xor   a
             ld    (erflag),a
@@ -772,10 +766,7 @@ readhst:    push   bc
 ; Write physical sector to host
 ;==============================================================================
 
-writehst:   push  bc
-            push  hl
-
-            call  cfWait
+writehst:   call  cfWait
             call  SetLBAadr
 
             ld    a,CF_WRITE_SEC
@@ -783,13 +774,9 @@ writehst:   push  bc
 
             call  cfWait
             ld    hl,hstbuf
-            ld    b,0
-            ld    c,CF_DATA
+            ld    bc,CF_DATA
             otir                    ; output 256 bytes
             otir                    ; and another 256
-
-            pop   hl
-            pop   bc
 
             xor   a
             ld    (erflag),a
