@@ -22,19 +22,21 @@
 ;  0.2    23-09-2021   Tadeusz Pycio         Created 
 ;  1.0    04-12-2021   Tadeusz Pycio         Public release     
 ;  1.1    14-04-2022   Tadeusz Pycio         Rebuilding interrupts
+;  1.2    25-10-2023   Tadeusz Pycio         Console int handler
 ;                                                                 
 ;******************************************************************************
 
 false       equ   0
 true        equ   -1
 
+quecon      equ   true              ; true if using queued consoles
 debug       equ   false
 
 tpabuf      equ   80h               ; Default I/O buffer and command line storage
 
 ; Ascii Character Equates
-LF          equ   0Ah         ; Line Feed
-CR          equ   0Dh         ; Carriage Return
+LF          equ   0Ah               ; Line Feed
+CR          equ   0Dh               ; Carriage Return
 
 
             cseg
@@ -91,8 +93,13 @@ itbl:       dw    badint            ;External INT-1 pin
             dw    badint            ;DMA Ch-0
             dw    badint            ;DMA Ch-1
             dw    badint            ;Clocked serial I/O
+      if  quecon
+            dw    serial0int        ;Asynch. comms. Ch-0
+            dw    serial1int        ;Asynch. comms. Ch-1
+      else
             dw    badint            ;Asynch. comms. Ch-0
             dw    badint            ;Asynch. comms. Ch-1
+      endif
 ; -----------------------------------------------------------------------------
 coldstart:
 warmstart:  ld    c,0
@@ -211,18 +218,18 @@ plco1       equ   4                 ; poll console #1 output
 
             ; Console status
 const:      call  ptbljmp           ; compute and jump to hndlr
-            dw    pt0st             ; console #0 status routine
-            dw    pt1st             ; console #1 status routine
+            dw    con0st            ; console #0 status routine
+            dw    con1st            ; console #1 status routine
 
             ; Read console character in
 conin:      call  ptbljmp           ; compute and jump to hndlr
-            dw    pt0in             ; console #0 input
-            dw    pt1in             ; console #1 input
+            dw    con0in            ; console #0 input
+            dw    con1in            ; console #1 input
 
             ; Write console character out
 conout:     call  ptbljmp           ; compute and jump to hndlr
-            dw    pt0out            ; console #0 output
-            dw    pt1out            ; console #1 output
+            dw    con0out           ; console #0 output
+            dw    con1out           ; console #1 output
 
 ptbljmp:    ld    a,d               ; compute and jump to handler,
             cp    numcns            ; d = console #, preserve it
@@ -244,21 +251,91 @@ tbljmp:     add   a,a
 ; -----------------------------------------------------------------------------
 ;	C O N S O L E   0
 
+;console # 0 input status routine
+;
+      if  not quecon
 polci0:
-pt0st:      in0   a,(STAT0)         ; Console status
+con0st:     in0   a,(STAT0)         ; Console status
             and   80h               ; Receive register (ST_RDRF) full?
             ret   z
             ld    a,0FFh
             ret
+      endif
 
-pt0in:      ld    c,poll
+;console #0 input routine
+;
+con0in:     equ   $
+      if  quecon
+            ld    c,readque            ;read queue function
+            ld    de,c0inuqcb          ;point to queue structure
+            call  xdos                 ;call xdos for char
+            ld    a,(char0in)          ;get char from buffer
+            and   7fh                  ;strip parity
+            ret
+
+;Console #0 process descriptor
+c0inpd      equ   $
+            dw    c1inpd               ;pl
+            db    0                    ;status
+            db    32                   ;priority
+            dw    c0instk+18           ;stack pointer
+            db    'C0in    '           ;name of function
+            db    0                    ;console
+            db    0FFh                 ;memseg
+            ds    36
+c0instk:    dw    0c7c7h,0c7c7h,0c7c7h
+            dw    0c7c7h,0c7c7h,0c7c7h
+            dw    0c7c7h,0c7c7h,0c7c7h
+            dw    c0inp                ;starting address
+
+;Console #0 input queue
+c0inq:      dw    0                    ;ql
+            db    'C0inque '           ;name
+            dw    1                    ;msglen
+            dw    16                   ;nmbmsgs
+            ds    8
+c0inmsgcnt: ds    2                    ;message count
+            ds    16                   ;buffer
+
+c0inqcb:    dw    c0inq                ;pointer
+            dw    ch0in                ;msg addr.
+ch0in:      db    0
+
+c0inuqcb:   dw    c0inq                ;pointer
+            dw    char0in              ;msg addr.
+char0in:    db    0                    ;char buffer
+;
+polci0      equ   $                    ;return ff if ready
+con0st      equ   $                    ;else, 00 if not
+            ld    a,(c0inmsgcnt)       ;any key pushed
+            or    a                    ;check for a 0
+            ret   z                    ;return if not ready
+            ld    a,0FFh               ;else, return its ready
+            ret
+;
+c0inp:      ld    c,makeque            ;make queue function
+            ld    de,c0inq             ;point to queue
+            call  xdos                 ;call xdos for makeing queue
+c0loop:     ld    c,flagwait           ;set flagwait for char
+            ld    e,6                  ;flag value
+            call  xdos                 ;wait till co in intrp flag
+            ld    c,writeque           ;now write the queue
+            ld    de,c0inqcb           ;point to the buffer area
+            call  xdos                 ;wait till char comes ready
+            jp    c0loop               ;loop till it does.
+;
+      else
+            ld    c,poll
             ld    e,plci0
             call  xdos              ; poll console #0 input
             in0   a,(RDR0)
             and   7Fh
             ret
-
-pt0out:     in0   a,(STAT0)         ; console output
+      endif
+;
+;console # 0 output handler
+;
+con0out:    in0   a,(STAT0)         ; console output
             bit   ST_TDRE,a         ; tx ready?
             jr    nz,tx0rdy
             push  bc
@@ -268,7 +345,9 @@ pt0out:     in0   a,(STAT0)         ; console output
             pop   bc
 tx0rdy:     out0  (TDR0),c          ; send it
             ret
-
+;
+;console # 0 output status routine
+;
 polco0:     in0   a,(STAT0)         ; Read UART status register of COM port 0.
             and   02h               ; tx (ST_TDRE) ready?
             ret   z
@@ -277,21 +356,89 @@ polco0:     in0   a,(STAT0)         ; Read UART status register of COM port 0.
 ; -----------------------------------------------------------------------------
 ;	C O N S O L E   1
 
+;console # 1 input status routine
+;
+      if  not quecon
 polci1:
-pt1st:      in0   a,(STAT1)         ; Console status
+con1st:     in0   a,(STAT1)         ; Console status
             and   80h               ; Receive register (ST_RDRF) full?
             ret   z                 ; 00h - not ready
             ld    a,0FFh            ; FFh - ready
             ret
+      endif
 
-pt1in:      ld    c,poll
+;console #1 input routine
+;
+con1in      equ   $
+      if  quecon
+            ld    c,readque            ;read queue function
+            ld    de,c1inuqcb          ;point to queue structure
+            call  xdos                 ;call xdos for char
+            ld    a,(char1in)          ;get char from buffer
+            and   7fh                  ;strip parity
+            ret
+;Console #1 Process Descriptor
+c1inpd      equ   $
+            dw    0                    ;pl
+            db    0                    ;status
+            db    32                   ;priority
+            dw    c1instk+18           ;stack pointer
+            db    'C1in    '           ;name of function
+            db    0                    ;console
+            db    0FFh                 ;memseg
+            ds    36
+c1instk:    dw    0c7c7h,0c7c7h,0c7c7h
+            dw    0c7c7h,0c7c7h,0c7c7h
+            dw    0c7c7h,0c7c7h,0c7c7h
+            dw    c1inp                ;starting address
+
+c1inq:      dw    0                    ;ql
+            db    'C1inque '           ;name
+            dw    1                    ;msglen
+            dw    16                   ;nmbmsgs
+            ds    8
+c1inmsgcnt:
+            ds    2                    ;message count
+            ds    16                   ;buffer
+c1inqcb:    dw    c1inq                ;pointer
+            dw    ch1in                ;msg addr.
+ch1in:      db    0
+c1inuqcb:
+            dw    c1inq                ;pointer
+            dw    char1in              ;msg addr.
+char1in:    db    0                    ;char buffer
+;
+polci1      equ   $                    ;return ff if ready
+con1st      equ   $                    ;else, 00 if not
+            ld    a,(c1inmsgcnt)       ;any key pushed
+            or    a                    ;check for a 0
+            ret   z                    ;return if not ready
+            ld    a,0FFh               ;else, return its ready
+            ret
+;
+c1inp:      ld    c,makeque            ;make queue function
+            ld    de,c1inq             ;point to queue
+            call  xdos                 ;call xdos for makeing queue
+c1loop:     ld    c,flagwait           ;set flagwait for char
+            ld    e,7                  ;flag value
+            call  xdos                 ;wait till co in intrp flag
+            ld    c,writeque           ;now write the queue
+            ld    de,c1inqcb           ;point to the buffer area
+            call  xdos                 ;wait till char comes ready
+            jp    c1loop               ;loop till it does.
+;
+      else
+con1in:     ld    c,poll
             ld    e,plci1
             call  xdos              ; poll console #1 input
             in0   a,(RDR1)
             and   7Fh
             ret
-
-pt1out:     in0   a,(STAT1)         ; console output
+      endif
+;
+;console # 1 output handler
+;
+con1out:    in0   a,(STAT1)         ; console output
             bit   ST_TDRE,a         ; Test TX Data Register Empty ready bit and
             jr    nz,tx1rdy
             push  bc
@@ -394,17 +541,54 @@ exitregion: ld    a,(preemp)
 
 ; -----------------------------------------------------------------------------
 ;	I N T E R R U P T   H A N D L E R S
-;     code by Hector Peraza
-; -----------------------------------------------------------------------------
+;------------------------------------------------------------------------------
+      if  quecon
+serial0int: di
+            push  af
+            ld    (savsp),sp        ; save stack ptr
+            ld    sp,lstintstk      ; local stack for intr hndl
+            ld    (savhl),hl
+            push  de
+            push  bc
+            push  ix
+            push  iy
+            ld    a,0FFh
+            ld    (preemp),a
 
+            in0   a,(RDR0)
+            ld    (ch0in),a          ; save con: 0 data
+            ld    e,6
+            jr    concmn
+
+serial1int: di
+            push  af
+            ld    (savsp),sp        ; save stack ptr
+            ld    sp,lstintstk      ; local stack for intr hndl
+            ld    (savhl),hl
+            push  de
+            push  bc
+            push  ix
+            push  iy
+            ld    a,0FFh
+            ld    (preemp),a
+            in0   a,(RDR1)
+            ld    (ch1in),a
+            ld    e,7
+
+concmn:     ld    c,flagset          ; set flag for ready
+            call  xdos               ; set flag #6 each tick
+            jr    intdone
+      endif
+
+;     code by Hector Peraza
 tickspsec   equ   50
 reload      equ   18432             ; CPU freq/1000
 
 timerint:   di
+            push  af
             ld    (savsp),sp
             ld    sp,lstintstk      ; local stack for intr hndl
-            push  af
-            push  hl
+            ld    (savhl),hl
             push  de
             push  bc
             push  ix
@@ -435,10 +619,12 @@ intdone:    xor   a
             pop   ix
             pop   bc
             pop   de
-            pop   hl
+            ld    sp,(savsp)        ; restore stack ptr
             pop   af
-            ld    sp,(savsp)
-            jp    pdisp             ; dispatch
+            ld    hl,pdisp          ; MP/M Dispatch -
+            push  hl                ; - put on stack for return
+            ld    hl,(savhl)        ; restore HL
+            reti                    ; clear int and jump to Dispatch
 
 badint:     di
             ld    sp,lstintstk
@@ -811,6 +997,7 @@ intstk:                             ; local interrupt stack
             dw    0c7c7h,0c7c7h,0c7c7h,0c7c7h,0c7c7h
 lstintstk:        
 savsp:      ds    2                 ; saved SP during interrupts
+savhl:      ds    2                 ; saved HL during interrupt handler
 tickn:      db    0                 ; ticking boolean, true = delayed
 preemp:     db    0                 ; preempted boolean
                   
@@ -878,7 +1065,7 @@ systeminit: di                      ; Disable interrupts
             xor   a
             out0  (TCR),a           ; disable timer interrputs and RPT downcounting
             out0  (STAT0),a         ; disable interrupts ASCI0
-            out0  (STAT1),a         ; disable interrupts ASCI1      
+            out0  (STAT1),a         ; disable interrupts ASCI1
 ; initialize mmu
 ;    Common(0) not used
 ;    Bank      0x0000 to 0xAFFF -> 0x80000 to 0x8AFFF 
@@ -897,9 +1084,31 @@ systeminit: di                      ; Disable interrupts
 ;
             ld    hl,tpabuf         ; Address of BIOS DMA buffer.
             ld    (dmaadr),hl
+
+; init hardware
+    ; Z180 ASCI0 config
+            ld    a,064h            ; RE,TE,8,N,1
+            out0  (CNTLA0),a
+            ld    a,20h             ; Baud rate 38400 @ 18.432 MHz
+            out0  (CNTLB0),a
+;
+    ; Z180 ASCI1 config
+            ld    a,074h            ; RE,TE,8,N,1
+            out0  (CNTLA1),a
+            ld    a,20h             ; Baud rate 38400 @ 18.432 MHz
+            out0  (CNTLB1),a
+;
+    ; CTC 0
+            ld    hl,reload
+            out0  (RLDR0L),l
+            out0  (RLDR0H),h
+    ; Paraller Port (not implemented)
+            ld    a, 00001111b      ; Set output PIO PortA
+            out   (PIOAC), a
+
 ; welcome message
             ld    hl,Welcome
-            call  PutMsg            ; Print welcome banner
+            call  PutMsg            ; print welcome banner
 ; initialize MP/M banks
             ld    hl,0
             ld    de,Welcome        ; use the welcome message as storage area
@@ -916,20 +1125,24 @@ inib2:      push  af
             dec   a
             jr    nz,inib2
             call  selbank           ; switch bank 0 back in
-; init hardware
-            ld    hl,reload
-            out0  (RLDR0L),l
-            out0  (RLDR0H),h
 
-            ld    a, 00001111b      ; Set output PIO PortA
-            out   (PIOAC), a
+        if  quecon
+            ld    c,create          ; create process
+            ld    de,c0inpd         ; point to process discriptor
+            call  xdos
+        endif
+
 ; init the Z180 int table (must begin on a 32-byte boundary)
             ld    hl,itbl
             ld    a,l
             out0  (IL),a            ; set Z180 low address
             ld    a,h               ; get page
             ld    i,a               ; to int register
-
+        if  quecon
+            ld    a,08h             ; enable ASCI interrupts
+            out0  (STAT0),a
+            out0  (STAT1),a
+        endif
             ld    a,11h             ; turn ints on and enable downcounting
             out0  (TCR),a
             ld    a,00h             ; activate external interrupts (default=disable)
@@ -937,6 +1150,6 @@ inib2:      push  af
             ei
             ret
 
-Welcome:    db	CR,LF,"Banked XIOS v1.1 for RC2014 by T.Pycio 2022",CR,0
+Welcome:    db   CR,LF,"Banked XIOS v1.2 for RCBus by T.Pycio 2023",CR,0
 
             end

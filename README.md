@@ -1,9 +1,9 @@
 # MPM II v 2.1
 
-## MPM II Operating System for Z180 RC2014
+## MPM II Operating System for Z180 RCBus
 
-Version 1.1  
-14-04-2022
+Version 1.2  
+25-10-2023
 
 Tadeusz Pycio
 
