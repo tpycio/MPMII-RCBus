@@ -234,7 +234,7 @@ conout:     call  ptbljmp           ; compute and jump to hndlr
 ptbljmp:    ld    a,d               ; compute and jump to handler,
             cp    numcns            ; d = console #, preserve it
             jr    c,tbljmp
-;           pop	af		; throw away table address (??)
+;            pop   af                ; throw away table address (??)
 rtnempty:   xor   a
             ret
 tbljmp:     add   a,a
@@ -250,17 +250,6 @@ tbljmp:     add   a,a
 
 ; -----------------------------------------------------------------------------
 ;	C O N S O L E   0
-
-;console # 0 input status routine
-;
-      if  not quecon
-polci0:
-con0st:     in0   a,(STAT0)         ; Console status
-            and   80h               ; Receive register (ST_RDRF) full?
-            ret   z
-            ld    a,0FFh
-            ret
-      endif
 
 ;console #0 input routine
 ;
@@ -331,6 +320,15 @@ c0loop:     ld    c,flagwait           ;set flagwait for char
             in0   a,(RDR0)
             and   7Fh
             ret
+
+;console # 0 input status routine
+;
+polci0:
+con0st:     in0   a,(STAT0)         ; Console status
+            and   80h               ; Receive register (ST_RDRF) full?
+            ret   z
+            ld    a,0FFh
+            ret
       endif
 ;
 ;console # 0 output handler
@@ -355,17 +353,6 @@ polco0:     in0   a,(STAT0)         ; Read UART status register of COM port 0.
             ret
 ; -----------------------------------------------------------------------------
 ;	C O N S O L E   1
-
-;console # 1 input status routine
-;
-      if  not quecon
-polci1:
-con1st:     in0   a,(STAT1)         ; Console status
-            and   80h               ; Receive register (ST_RDRF) full?
-            ret   z                 ; 00h - not ready
-            ld    a,0FFh            ; FFh - ready
-            ret
-      endif
 
 ;console #1 input routine
 ;
@@ -428,11 +415,20 @@ c1loop:     ld    c,flagwait           ;set flagwait for char
             jp    c1loop               ;loop till it does.
 ;
       else
-con1in:     ld    c,poll
+            ld    c,poll
             ld    e,plci1
             call  xdos              ; poll console #1 input
             in0   a,(RDR1)
             and   7Fh
+            ret
+
+;console # 1 input status routine
+;
+polci1:
+con1st:     in0   a,(STAT1)         ; Console status
+            and   80h               ; Receive register (ST_RDRF) full?
+            ret   z                 ; 00h - not ready
+            ld    a,0FFh            ; FFh - ready
             ret
       endif
 ;
@@ -557,7 +553,7 @@ serial0int: di
 
             in0   a,(RDR0)
             ld    (ch0in),a          ; save con: 0 data
-            ld    e,6
+            ld    e,6                ; flag #6
             jr    concmn
 
 serial1int: di
@@ -573,10 +569,10 @@ serial1int: di
             ld    (preemp),a
             in0   a,(RDR1)
             ld    (ch1in),a
-            ld    e,7
+            ld    e,7                ; flag #7
 
 concmn:     ld    c,flagset          ; set flag for ready
-            call  xdos               ; set flag #6 each tick
+            call  xdos               ; set flag
             jr    intdone
       endif
 
@@ -940,7 +936,7 @@ readhst:    call  cfWait
 
             call  cfWait
             ld    hl,hstbuf
-            ld    bc,CF_DATA            
+            ld    bc,CF_DATA
             inir                    ; input 256 bytes
             inir                    ; and another 256
 
@@ -1000,7 +996,7 @@ savsp:      ds    2                 ; saved SP during interrupts
 savhl:      ds    2                 ; saved HL during interrupt handler
 tickn:      db    0                 ; ticking boolean, true = delayed
 preemp:     db    0                 ; preempted boolean
-                  
+
 userdrv:    ds    1                 ; Boot-drive number
 
 localData:              ; XIOS workspace
@@ -1063,7 +1059,7 @@ hstbuf:     ds    512               ;host buffer
 ;
 systeminit: di                      ; Disable interrupts
             xor   a
-            out0  (TCR),a           ; disable timer interrputs and RPT downcounting
+            out0  (TCR),a           ; disable timer interrupts and RPT downcounting
             out0  (STAT0),a         ; disable interrupts ASCI0
             out0  (STAT1),a         ; disable interrupts ASCI1
 ; initialize mmu
@@ -1128,7 +1124,7 @@ inib2:      push  af
 
         if  quecon
             ld    c,create          ; create process
-            ld    de,c0inpd         ; point to process discriptor
+            ld    de,c0inpd         ; point to process descriptor
             call  xdos
         endif
 

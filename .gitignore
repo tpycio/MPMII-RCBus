@@ -1,0 +1,13 @@
+# Not sure what patterns to apply
+# So ignoring all generated files explicitly
+
+**/*.lst
+**/*.o
+**/*.prn
+**/*.rel
+**/*.sym
+**/*.sys
+**/*.tmp
+**/*.bak
+**/*.hex
+**/*.bin
