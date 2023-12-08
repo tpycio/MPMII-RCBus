@@ -23,6 +23,7 @@
 ;  1.0    04-12-2021   Tadeusz Pycio         Public release     
 ;  1.1    14-04-2022   Tadeusz Pycio         Rebuilding interrupts
 ;  1.2    25-10-2023   Tadeusz Pycio         Console int handler
+;  1.3    07-12-2023   Tadeusz Pycio         DMA memory transfer
 ;                                                                 
 ;******************************************************************************
 
@@ -30,7 +31,7 @@ false       equ   0
 true        equ   -1
 
 quecon      equ   true              ; true if using queued consoles
-debug       equ   false
+dma         equ   true              ; true if using DMA memory transfers
 
 tpabuf      equ   80h               ; Default I/O buffer and command line storage
 
@@ -831,16 +832,44 @@ match:      ld    a,(seksec)        ;mask buffer number
             ex    de,hl             ;source/dest swap
 ;
             ;BC initially 128, HL is source, DE is dest
-rwmove:     push  de
+rwmove:
+      if  DMA
+            out0  (SAR0H),h          ; Source HL
+            out0  (SAR0L),l
+            out0  (DAR0H),d          ; Dest DE
+            out0  (DAR0L),e
+      else
+            push  de
             push  hl
-
+      endif
             call  swtuser           ;switch to user context
+            ld    bc, 128           ;length of move
             di                      ;disable int
+      if  DMA
+            ld    a,08h
+            out0  (DAR0B),a
+            ld    a,0B0h
+            cp    d                 ; system page?
+            jr    c, dmaset
+
+            in0   a,(bbr)           ; current page
+            rrca
+            rrca
+            rrca
+            rrca
+            out0  (DAR0B),a
+dmaset:     out0  (BCR0H),b         ; set up the transfer size
+            out0  (BCR0L),c
+
+            ld    bc, 0240h         ; +(DMODE_MMOD)*$100+DSTAT_DE0
+            out0  (DMODE),b         ; DMODE_MMOD - memory++ to memory++, burst mode
+            out0  (DSTAT),c         ; DSTAT_DE0 - enable DMA channel 0, no interrupt
+                                    ; in burst mode the Z180 CPU stops until the DMA completes
+      else
             pop   hl
             pop   de
-            ld    bc, 128           ;length of move 
-            ei           
             ldir
+      endif
             call  swtsys            ;back to system context
 ;
 ;                             data has been moved to/from host buffer
@@ -888,7 +917,7 @@ SetLBAadr:  ld    hl,(hsttrk)       ; 0000000T tttttttt
             ld    b,a
             ld    a,(hstsec)        ; 000sssss
             or    b                 ; tttsssss
-            ld    (lba0),a
+            out   (CF_LBA0),a
 
             ld    a,l               ; tttttttt
             and   0F8h              ; ttttt000
@@ -903,23 +932,15 @@ SetLBAadr:  ld    hl,(hsttrk)       ; 0000000T tttttttt
             ld    c,a
             and   0C0h              ; vv000000
             or    b                 ; vvTttttt
-            ld    (lba1),a
+            out   (CF_LBA1),a
 
             ld    a,c               ; vvVvvvvv
             and   3Fh               ; 00Vvvvvv
-            ld    (lba2),a
+            out   (CF_LBA2),a
             ld    a,0E0h            ; LBA Mode using drive 0 = E0
-            ld    (lba3),a
+            out   (CF_LBA3),a
 
-            ld    c,CF_LBA0         ; first LBA port
-            ld    hl,lba0           ; set first LBA
-            ld    b,4               ; 4 to go
-sl1:        outi                    ; output and increment HL
-            jr    z,sl2             ; if all 4 done, exit
-            inc   c                 ; next LBA Port
-            jr    sl1               ; output next LBA
-
-sl2:        ld    a,1
+            ld    a,1
             out   (CF_SECCOUNT),a
 
             ret    
@@ -999,9 +1020,10 @@ preemp:     db    0                 ; preempted boolean
 
 userdrv:    ds    1                 ; Boot-drive number
 
+dirbuf:     ds    128               ;scratch directory area
+
 localData:              ; XIOS workspace
 
-dirbuf:     ds    128               ;scratch directory area
 alv00:      ds    257               ;allocation vector 0
 alv01:      ds    257               ;allocation vector 1
 alv02:      ds    257               ;allocation vector 2
@@ -1018,11 +1040,6 @@ alv12:      ds    257               ;allocation vector 12
 alv13:      ds    257               ;allocation vector 13
 alv14:      ds    257               ;allocation vector 14
 alv15:      ds    257               ;allocation vector 15
-
-lba0        db    00h
-lba1        db    00h
-lba2        db    00h
-lba3        db    00h
 
 sekdsk:     ds    1                 ;seek disk number
 sektrk:     ds    2                 ;seek track number
@@ -1071,6 +1088,10 @@ systeminit: di                      ; Disable interrupts
             ld    a, 080h           ; base bank address 0x80000h
             out0  (BBR),a
 ;
+      if  DMA
+            ld    a,08h
+            out0  (SAR0B),a         ; set system page
+      endif
             xor   a                 ; Cold Start
             ld    (userdrv),a       ; Start from the boot disk (Drive A:, User 0)
             ld    (hstact),a        ; Host Buffer inactive
@@ -1122,11 +1143,11 @@ inib2:      push  af
             jr    nz,inib2
             call  selbank           ; switch bank 0 back in
 
-        if  quecon
+      if  quecon
             ld    c,create          ; create process
             ld    de,c0inpd         ; point to process descriptor
             call  xdos
-        endif
+      endif
 
 ; init the Z180 int table (must begin on a 32-byte boundary)
             ld    hl,itbl
@@ -1134,11 +1155,11 @@ inib2:      push  af
             out0  (IL),a            ; set Z180 low address
             ld    a,h               ; get page
             ld    i,a               ; to int register
-        if  quecon
+      if  quecon
             ld    a,08h             ; enable ASCI interrupts
             out0  (STAT0),a
             out0  (STAT1),a
-        endif
+      endif
             ld    a,11h             ; turn ints on and enable downcounting
             out0  (TCR),a
             ld    a,00h             ; activate external interrupts (default=disable)
@@ -1146,6 +1167,6 @@ inib2:      push  af
             ei
             ret
 
-Welcome:    db   CR,LF,"Banked XIOS v1.2 for RCBus by T.Pycio 2023",CR,0
+Welcome:    db   CR,LF,"Banked XIOS v1.3 for RCBus by T.Pycio 2023",CR,0
 
             end
