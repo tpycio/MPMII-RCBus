@@ -960,13 +960,10 @@ readhst:    call  cfWait
 
             call  cfWait
             ld    hl,hstbuf
-            ld    bc,CF_DATA
 
          if CFDMA
             out0  (MAR1H),h         ; Dest mem HL
             out0  (MAR1L),l
-            out0  (IAR1H),b         ; Source I/O DE
-            out0  (IAR1L),c
             ld    bc,512            ; block size
             out0  (BCR1H),b         ; set up the transfer size
             out0  (BCR1L),c
@@ -975,6 +972,7 @@ readhst:    call  cfWait
             out0  (DSTAT),c         ; DSTAT_DE1 - enable DMA channel 1, no interrupt
                                     ; in burst mode the Z180 CPU stops until the DMA completes
          else
+            ld    bc,CF_DATA
             inir                    ; input 256 bytes
             inir                    ; and another 256
          endif
@@ -994,12 +992,10 @@ writehst:   call  cfWait
 
             call  cfWait
             ld    hl,hstbuf
-            ld    bc,CF_DATA
+
          if CFDMA
             out0  (MAR1H),h         ; Source mem HL
             out0  (MAR1L),l
-            out0  (IAR1H),b         ; Dest I/O DE
-            out0  (IAR1L),c
             ld    bc,512            ; block size
             out0  (BCR1H),b         ; set up the transfer size
             out0  (BCR1L),c
@@ -1008,6 +1004,7 @@ writehst:   call  cfWait
             out0  (DSTAT),c         ; DSTAT_DE1 - enable DMA channel 1, no interrupt
                                     ; in burst mode the Z180 CPU stops until the DMA completes
          else
+            ld    bc,CF_DATA
             otir                    ; output 256 bytes
             otir                    ; and another 256
          endif
@@ -1126,6 +1123,9 @@ systeminit: di                      ; Disable interrupts
       if  CFDMA
             ld    a,08h
             out0  (MAR1B),a         ; set system page
+            ld    bc,CF_DATA
+            out0  (IAR1H),b         ; I/O CF Data reg
+            out0  (IAR1L),c
       endif
 
             xor   a                 ; Cold Start
@@ -1203,6 +1203,6 @@ inib2:      push  af
             ei
             ret
 
-Welcome:    db   CR,LF,"Banked XIOS v1.4 for RCBus by T.Pycio 2023",CR,0
+Welcome:    db   CR,LF,"Banked XIOS v1.41 for RCBus by T.Pycio 2023",CR,0
 
             end
