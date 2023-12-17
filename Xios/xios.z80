@@ -24,6 +24,7 @@
 ;  1.1    14-04-2022   Tadeusz Pycio         Rebuilding interrupts
 ;  1.2    25-10-2023   Tadeusz Pycio         Console int handler
 ;  1.3    07-12-2023   Tadeusz Pycio         DMA memory transfer
+;  1.4    17-12-2023   Tadeusz Pycio         CF DMA transfer
 ;                                                                 
 ;******************************************************************************
 
@@ -32,6 +33,7 @@ true        equ   -1
 
 quecon      equ   true              ; true if using queued consoles
 dma         equ   true              ; true if using DMA memory transfers
+cfdma       equ   false              ; true if using DMA Compact Flash, requires hardware setting in low state /DREQ1
 
 tpabuf      equ   80h               ; Default I/O buffer and command line storage
 
@@ -39,6 +41,7 @@ tpabuf      equ   80h               ; Default I/O buffer and command line storag
 LF          equ   0Ah               ; Line Feed
 CR          equ   0Dh               ; Carriage Return
 
+CBASE       equ   0B0h              ; CommonBase address
 
             cseg
 
@@ -848,7 +851,7 @@ rwmove:
       if  DMA
             ld    a,08h
             out0  (DAR0B),a
-            ld    a,0B0h
+            ld    a,CBASE
             cp    d                 ; system page?
             jr    c, dmaset
 
@@ -958,9 +961,23 @@ readhst:    call  cfWait
             call  cfWait
             ld    hl,hstbuf
             ld    bc,CF_DATA
+
+         if CFDMA
+            out0  (MAR1H),h         ; Dest mem HL
+            out0  (MAR1L),l
+            out0  (IAR1H),b         ; Source I/O DE
+            out0  (IAR1L),c
+            ld    bc,512            ; block size
+            out0  (BCR1H),b         ; set up the transfer size
+            out0  (BCR1L),c
+            ld    bc, 1280h         ; +(DCNTL_DIM1&IWI0)*$100+DSTAT_DE1
+            out0  (DCNTL),b         ; DCNTL_DIM1 - IO fixed to memory++, IWI0 - IO 1 WS
+            out0  (DSTAT),c         ; DSTAT_DE1 - enable DMA channel 1, no interrupt
+                                    ; in burst mode the Z180 CPU stops until the DMA completes
+         else
             inir                    ; input 256 bytes
             inir                    ; and another 256
-
+         endif
             xor   a
             ld    (erflag),a
             ret
@@ -978,9 +995,22 @@ writehst:   call  cfWait
             call  cfWait
             ld    hl,hstbuf
             ld    bc,CF_DATA
+         if CFDMA
+            out0  (MAR1H),h         ; Source mem HL
+            out0  (MAR1L),l
+            out0  (IAR1H),b         ; Dest I/O DE
+            out0  (IAR1L),c
+            ld    bc,512            ; block size
+            out0  (BCR1H),b         ; set up the transfer size
+            out0  (BCR1L),c
+            ld    bc, 1080h         ; +(DCNTL_IWI0)*$100+DSTAT_DE1
+            out0  (DCNTL),b         ; DCNTL - memory++ to IO fixed, IWI0 - IO 1 WS
+            out0  (DSTAT),c         ; DSTAT_DE1 - enable DMA channel 1, no interrupt
+                                    ; in burst mode the Z180 CPU stops until the DMA completes
+         else
             otir                    ; output 256 bytes
             otir                    ; and another 256
-
+         endif
             xor   a
             ld    (erflag),a
             ret
@@ -1083,7 +1113,7 @@ systeminit: di                      ; Disable interrupts
 ;    Common(0) not used
 ;    Bank      0x0000 to 0xAFFF -> 0x80000 to 0x8AFFF 
 ;    Common(1) 0xB000 to 0xFFFF -> 0x88000 to 0x8FFFF
-            ld    a, 0B0h           ; 44k bank
+            ld    a, CBASE          ; 44k bank
             out0  (CBAR),a
             ld    a, 080h           ; base bank address 0x80000h
             out0  (BBR),a
@@ -1092,6 +1122,12 @@ systeminit: di                      ; Disable interrupts
             ld    a,08h
             out0  (SAR0B),a         ; set system page
       endif
+
+      if  CFDMA
+            ld    a,08h
+            out0  (MAR1B),a         ; set system page
+      endif
+
             xor   a                 ; Cold Start
             ld    (userdrv),a       ; Start from the boot disk (Drive A:, User 0)
             ld    (hstact),a        ; Host Buffer inactive
@@ -1167,6 +1203,6 @@ inib2:      push  af
             ei
             ret
 
-Welcome:    db   CR,LF,"Banked XIOS v1.3 for RCBus by T.Pycio 2023",CR,0
+Welcome:    db   CR,LF,"Banked XIOS v1.4 for RCBus by T.Pycio 2023",CR,0
 
             end
