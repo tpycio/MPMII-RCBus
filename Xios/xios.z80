@@ -25,23 +25,21 @@
 ;  1.2    25-10-2023   Tadeusz Pycio         Console int handler
 ;  1.3    07-12-2023   Tadeusz Pycio         DMA memory transfer
 ;  1.4    17-12-2023   Tadeusz Pycio         CF DMA transfer
-;                                                                 
+;  1.42   20-12-2023   Tadeusz Pycio         Removed changes made in version 1.3
 ;******************************************************************************
 
 false       equ   0
 true        equ   -1
 
 quecon      equ   true              ; true if using queued consoles
-dma         equ   true              ; true if using DMA memory transfers
 cfdma       equ   false              ; true if using DMA Compact Flash, requires hardware setting in low state /DREQ1
 
 tpabuf      equ   80h               ; Default I/O buffer and command line storage
+cbase       equ   0B0h              ; CommonBase address
 
 ; Ascii Character Equates
 LF          equ   0Ah               ; Line Feed
 CR          equ   0Dh               ; Carriage Return
-
-CBASE       equ   0B0h              ; CommonBase address
 
             cseg
 
@@ -85,7 +83,6 @@ sysdat:     dw    $-$
 ; -----------------------------------------------------------------------------
 ; Padding string, exactly 4 bytes long, to make sure that the interrupt
 ; table begins on an 32-byte boundary
-
             db    "Z180"
 
 ; Z180 interrupt table, must begin in a 32-byte boundary
@@ -201,6 +198,7 @@ conoutA:    in0   a,(STAT0)         ; console 0 status
 ;	I / O   H A N D L E R S 
 
 numcns      equ   2                 ; number of consoles
+numbnk      equ   7                 ; number of memory banks
 
 poll        equ   131               ; XDOS poll function
 makeque     equ   134               ; XDOS make queue
@@ -835,44 +833,14 @@ match:      ld    a,(seksec)        ;mask buffer number
             ex    de,hl             ;source/dest swap
 ;
             ;BC initially 128, HL is source, DE is dest
-rwmove:
-      if  DMA
-            out0  (SAR0H),h          ; Source HL
-            out0  (SAR0L),l
-            out0  (DAR0H),d          ; Dest DE
-            out0  (DAR0L),e
-      else
-            push  de
+rwmove:     push  de
             push  hl
-      endif
             call  swtuser           ;switch to user context
-            ld    bc, 128           ;length of move
             di                      ;disable int
-      if  DMA
-            ld    a,08h
-            out0  (DAR0B),a
-            ld    a,CBASE
-            cp    d                 ; system page?
-            jr    c, dmaset
-
-            in0   a,(bbr)           ; current page
-            rrca
-            rrca
-            rrca
-            rrca
-            out0  (DAR0B),a
-dmaset:     out0  (BCR0H),b         ; set up the transfer size
-            out0  (BCR0L),c
-
-            ld    bc, 0240h         ; +(DMODE_MMOD)*$100+DSTAT_DE0
-            out0  (DMODE),b         ; DMODE_MMOD - memory++ to memory++, burst mode
-            out0  (DSTAT),c         ; DSTAT_DE0 - enable DMA channel 0, no interrupt
-                                    ; in burst mode the Z180 CPU stops until the DMA completes
-      else
+            ld    bc, 128           ;length of move
             pop   hl
             pop   de
             ldir
-      endif
             call  swtsys            ;back to system context
 ;
 ;                             data has been moved to/from host buffer
@@ -968,9 +936,8 @@ readhst:    call  cfWait
             out0  (BCR1H),b         ; set up the transfer size
             out0  (BCR1L),c
             ld    bc, 1280h         ; +(DCNTL_DIM1&IWI0)*$100+DSTAT_DE1
-            out0  (DCNTL),b         ; DCNTL_DIM1 - IO fixed to memory++, IWI0 - IO 1 WS
+            out0  (DCNTL),b         ; DCNTL_DIM1 - I/O fixed to memory++, IWI0 - I/O 1 WS
             out0  (DSTAT),c         ; DSTAT_DE1 - enable DMA channel 1, no interrupt
-                                    ; in burst mode the Z180 CPU stops until the DMA completes
          else
             ld    bc,CF_DATA
             inir                    ; input 256 bytes
@@ -1000,9 +967,8 @@ writehst:   call  cfWait
             out0  (BCR1H),b         ; set up the transfer size
             out0  (BCR1L),c
             ld    bc, 1080h         ; +(DCNTL_IWI0)*$100+DSTAT_DE1
-            out0  (DCNTL),b         ; DCNTL - memory++ to IO fixed, IWI0 - IO 1 WS
+            out0  (DCNTL),b         ; DCNTL - memory++ to I/O fixed, IWI0 - I/O 1 WS
             out0  (DSTAT),c         ; DSTAT_DE1 - enable DMA channel 1, no interrupt
-                                    ; in burst mode the Z180 CPU stops until the DMA completes
          else
             ld    bc,CF_DATA
             otir                    ; output 256 bytes
@@ -1115,11 +1081,6 @@ systeminit: di                      ; Disable interrupts
             ld    a, 080h           ; base bank address 0x80000h
             out0  (BBR),a
 ;
-      if  DMA
-            ld    a,08h
-            out0  (SAR0B),a         ; set system page
-      endif
-
       if  CFDMA
             ld    a,08h
             out0  (MAR1B),a         ; set system page
@@ -1167,7 +1128,7 @@ systeminit: di                      ; Disable interrupts
             ld    de,Welcome        ; use the welcome message as storage area
             ld    bc,64             ; copy the first 64 bytes (contains XIOS and
             ldir                    ; BDOS vectors, etc.)
-            ld    a,7               ; number of banks
+            ld    a, numbnk         ; number of banks
 inib2:      push  af
             call  selbank
             ld    hl,Welcome
@@ -1203,6 +1164,6 @@ inib2:      push  af
             ei
             ret
 
-Welcome:    db   CR,LF,"Banked XIOS v1.41 for RCBus by T.Pycio 2023",CR,0
+Welcome:    db   CR,LF,"Banked XIOS v1.42 for RCBus by T.Pycio 2023",CR,0
 
             end
