@@ -236,7 +236,7 @@ conout:     call  ptbljmp           ; compute and jump to hndlr
 ptbljmp:    ld    a,d               ; compute and jump to handler,
             cp    numcns            ; d = console #, preserve it
             jr    c,tbljmp
-;            pop   af                ; throw away table address (??)
+            pop   af                ; throw away table address
 rtnempty:   xor   a
             ret
 tbljmp:     add   a,a
@@ -659,8 +659,21 @@ sectran:    ld    h,b
             ld    l,c               ; Null routine: just BC => HL
             ret
 ; -----------------------------------------------------------------------------
-
+; set dma address given by registers bc
 setdma:     ld    (dmaadr),bc       ; Buffer addr. in BC
+            inc   bc                ; check for flush buffer
+            ld    a,b               ; check for b,c = 0
+            or    c
+            ret   nz                ; hl=FFFF is flush buffer
+            ld    hl,hstwrt         ; point to host write flag
+            ld    a,(hl)            ; check for pending write
+            ld    (hl),0            ; reset, we are writing it out
+            or    a                 ; is it pending write?
+            ret   z                 ; return if not
+            call  writehst          ; else,..flush to disk
+            or    a                 ; any errors?
+            ret   z                 ; return if not
+            pop   hl                ; error found
             ret
 ; -----------------------------------------------------------------------------
 seldsk:     ld    hl,0000h          ; Select drive (C): DPH ptr. in HL
