@@ -1,4 +1,4 @@
-            TITLE  'MP/M-II Banked XIOS for RC2014'
+            TITLE  'MP/M-II Banked XIOS for RCBus'
             ; Get processor, chip and general equates
             .z180
             include z180hwr.inc
@@ -6,8 +6,8 @@
 ;******************************************************************************
 ;******************************************************************************
 ;**                                                                          **
-;**                  M P / M  I I   B a n k e d   X I O S                    **
-;**                            by Tadeusz Pycio                              **
+;**                   M P / M   I I   X I O S   M o d u l e                  **
+;**                           by Tadeusz Pycio                               **
 ;**                                                                          **
 ;******************************************************************************
 ;******************************************************************************
@@ -26,21 +26,28 @@
 ;  1.3    07-12-2023   Tadeusz Pycio         DMA memory transfer
 ;  1.4    17-12-2023   Tadeusz Pycio         CF DMA transfer
 ;  1.42   20-12-2023   Tadeusz Pycio         Removed changes made in version 1.3
+;  1.5    29-12-2023   Tadeusz Pycio         Commonbase address offset
 ;******************************************************************************
 
 false       equ   0
 true        equ   -1
 
 quecon      equ   true              ; true if using queued consoles
-cfdma       equ   false              ; true if using DMA Compact Flash, requires hardware setting in low state /DREQ1
+cfdma       equ   true              ; true if using DMA Compact Flash, requires hardware setting in low state /DREQ1
 
 tpabuf      equ   80h               ; Default I/O buffer and command line storage
-cbase       equ   0B0h              ; CommonBase address
+cbase       equ   0C0h              ; CommonBase address
+numbnk      equ   7                 ; number of memory banks
+numdsk      equ   16                ; number disks
+numcns      equ   2                 ; number of consoles
+
+vect        equ   6                 ; restart vector number
 
 ; Ascii Character Equates
 LF          equ   0Ah               ; Line Feed
 CR          equ   0Dh               ; Carriage Return
 
+; -----------------------------------------------------------------------------
             cseg
 
 ; Jump vectors for individual subroutines
@@ -74,41 +81,6 @@ wboot:      jp    warmstart         ; Warm Boot, Terminate process
 ;           jp    idle
 
 ; -----------------------------------------------------------------------------
-commonbase: jp    coldstart
-swtuser:    jp    $-$
-swtsys:     jp    $-$
-pdisp:      jp    $-$
-xdos:       jp    $-$
-sysdat:     dw    $-$
-; -----------------------------------------------------------------------------
-; Padding string, exactly 4 bytes long, to make sure that the interrupt
-; table begins on an 32-byte boundary
-            db    "Z180"
-
-; Z180 interrupt table, must begin in a 32-byte boundary
-
-itbl:       dw    badint            ;External INT-1 pin
-            dw    badint            ;External INT-2 pin
-            dw    timerint          ;Timer 0
-            dw    badint            ;Timer 1
-            dw    badint            ;DMA Ch-0
-            dw    badint            ;DMA Ch-1
-            dw    badint            ;Clocked serial I/O
-      if  quecon
-            dw    serial0int        ;Asynch. comms. Ch-0
-            dw    serial1int        ;Asynch. comms. Ch-1
-      else
-            dw    badint            ;Asynch. comms. Ch-0
-            dw    badint            ;Asynch. comms. Ch-1
-      endif
-; -----------------------------------------------------------------------------
-coldstart:
-warmstart:  ld    c,0
-            jp    xdos              ; system reset, terminate process
-
-;==============================================================================
-;	D I S K   O R G A N I S A T I O N   T A B L E S
-;==============================================================================
 
 blksiz      equ   4096              ;MP/M allocation size
 hstsiz      equ   512               ;host disk sector size
@@ -121,523 +93,7 @@ wrall       equ   0                 ; write to allocated
 wrdir       equ   1                 ; write to directory
 wrual       equ   2                 ; write to unallocated
 
-;==============================================================================
-; Disk parameter headers for disk 0 to 15
-;==============================================================================
-
-dpbase:     dw    0000h,0000h,0000h,0000h,dirbuf,dpb0,0000h,alv00
-            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv01
-            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv02
-            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv03
-            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv04
-            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv05
-            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv06
-            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv07
-            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv08
-            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv09
-            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv10
-            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv11
-            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv12
-            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv13
-            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv14
-            dw    0000h,0000h,0000h,0000h,dirbuf,dpbLast,0000h,alv15
-            
-; First drive has a reserved track for MP/M
-
-dpb0:       dw    128               ;SPT - sectors per track
-            db    5                 ;BSH - block shift factor
-            db    31                ;BLM - block mask
-            db    1                 ;EXM - Extent mask
-            dw    2043              ; (2047-4) DSM - Storage size (blocks - 1)
-            dw    511               ;DRM - Number of directory entries - 1
-            db    240               ;AL0 - 1 bit set per directory block
-            db    0                 ;AL1 -            "
-            dw    0                 ;CKS - DIR check vector size (DRM+1)/4 (0=fixed disk)
-            dw    1                 ;OFF - Reserved tracks
-
-dpb:        dw    128               ;SPT - sectors per track
-            db    5                 ;BSH - block shift factor
-            db    31                ;BLM - block mask
-            db    1                 ;EXM - Extent mask
-            dw    2047              ;DSM - Storage size (blocks - 1)
-            dw    511               ;DRM - Number of directory entries - 1
-            db    240               ;AL0 - 1 bit set per directory block
-            db    0                 ;AL1 -            "
-            dw    0                 ;CKS - DIR check vector size (DRM+1)/4 (0=fixed disk)
-            dw    0                 ;OFF - Reserved tracks
-
-; Last drive is smaller because CF is never full 128MB
-
-dpbLast:    dw    128               ;SPT - sectors per track
-            db    5                 ;BSH - block shift factor
-            db    31                ;BLM - block mask
-            db    1                 ;EXM - Extent mask
-            dw    511               ;DSM - Storage size (blocks - 1)  ; 511 = 2MB (for 128MB card)
-            dw    511               ;DRM - Number of directory entries - 1
-            db    240               ;AL0 - 1 bit set per directory block
-            db    0                 ;AL1 -            "
-            dw    0                 ;CKS - DIR check vector size (DRM+1)/4 (0=fixed disk)
-            dw    0                 ;OFF - Reserved tracks
-
 ; -----------------------------------------------------------------------------
-; output ASCII on console 0
-
-PutMsg:     ld    a,(hl)            ; Affects A, C, HL
-            and   a
-            ret   z                 ; Zero terminates
-
-            ld    c,a               ; Display 1 char.
-conoutA:    in0   a,(STAT0)         ; console 0 status
-            bit   ST_TDRE,a         ; tx empty?
-            jr    z,conoutA         ; No, so keep waiting
-            out0  (TDR0),c          ; Write byte to serial port
-            inc   hl
-            jr    PutMsg
-
-; -----------------------------------------------------------------------------
-;	I / O   H A N D L E R S 
-
-numcns      equ   2                 ; number of consoles
-numbnk      equ   7                 ; number of memory banks
-
-poll        equ   131               ; XDOS poll function
-makeque     equ   134               ; XDOS make queue
-readque     equ   137               ; XDOS read queue
-writeque    equ   139               ; XDOS write queue
-xdelay      equ   141               ; XDOS delay
-create      equ   144               ; XDOS create process
-flagwait    equ   132
-flagset     equ   133
-dsptch      equ   142
-
-
-pldsk       equ   0                 ; poll CF 
-plci0       equ   1                 ; poll console #0 input
-plco0       equ   2                 ; poll console #0 output
-plci1       equ   3                 ; poll console #1 input
-plco1       equ   4                 ; poll console #1 output
-;pllpt       equ   5                 ; poll LPT     
-
-            ; Console status
-const:      call  ptbljmp           ; compute and jump to hndlr
-            dw    con0st            ; console #0 status routine
-            dw    con1st            ; console #1 status routine
-
-            ; Read console character in
-conin:      call  ptbljmp           ; compute and jump to hndlr
-            dw    con0in            ; console #0 input
-            dw    con1in            ; console #1 input
-
-            ; Write console character out
-conout:     call  ptbljmp           ; compute and jump to hndlr
-            dw    con0out           ; console #0 output
-            dw    con1out           ; console #1 output
-
-ptbljmp:    ld    a,d               ; compute and jump to handler,
-            cp    numcns            ; d = console #, preserve it
-            jr    c,tbljmp
-            pop   af                ; throw away table address
-rtnempty:   xor   a
-            ret
-tbljmp:     add   a,a
-            pop   hl
-            ld    e,a
-            ld    d,0
-            add   hl,de
-            ld    e,(hl)
-            inc   hl
-            ld    d,(hl)
-            ex    de,hl
-            jp    (hl)              ; jump to computed cns handler
-
-; -----------------------------------------------------------------------------
-;	C O N S O L E   0
-
-;console #0 input routine
-;
-con0in:     equ   $
-      if  quecon
-            ld    c,readque            ;read queue function
-            ld    de,c0inuqcb          ;point to queue structure
-            call  xdos                 ;call xdos for char
-            ld    a,(char0in)          ;get char from buffer
-            and   7fh                  ;strip parity
-            ret
-
-;Console #0 process descriptor
-c0inpd      equ   $
-            dw    c1inpd               ;pl
-            db    0                    ;status
-            db    32                   ;priority
-            dw    c0instk+18           ;stack pointer
-            db    'C0in    '           ;name of function
-            db    0                    ;console
-            db    0FFh                 ;memseg
-            ds    36
-c0instk:    dw    0c7c7h,0c7c7h,0c7c7h
-            dw    0c7c7h,0c7c7h,0c7c7h
-            dw    0c7c7h,0c7c7h,0c7c7h
-            dw    c0inp                ;starting address
-
-;Console #0 input queue
-c0inq:      dw    0                    ;ql
-            db    'C0inque '           ;name
-            dw    1                    ;msglen
-            dw    16                   ;nmbmsgs
-            ds    8
-c0inmsgcnt: ds    2                    ;message count
-            ds    16                   ;buffer
-
-c0inqcb:    dw    c0inq                ;pointer
-            dw    ch0in                ;msg addr.
-ch0in:      db    0
-
-c0inuqcb:   dw    c0inq                ;pointer
-            dw    char0in              ;msg addr.
-char0in:    db    0                    ;char buffer
-;
-polci0      equ   $                    ;return ff if ready
-con0st      equ   $                    ;else, 00 if not
-            ld    a,(c0inmsgcnt)       ;any key pushed
-            or    a                    ;check for a 0
-            ret   z                    ;return if not ready
-            ld    a,0FFh               ;else, return its ready
-            ret
-;
-c0inp:      ld    c,makeque            ;make queue function
-            ld    de,c0inq             ;point to queue
-            call  xdos                 ;call xdos for makeing queue
-c0loop:     ld    c,flagwait           ;set flagwait for char
-            ld    e,6                  ;flag value
-            call  xdos                 ;wait till co in intrp flag
-            ld    c,writeque           ;now write the queue
-            ld    de,c0inqcb           ;point to the buffer area
-            call  xdos                 ;wait till char comes ready
-            jp    c0loop               ;loop till it does.
-;
-      else
-            ld    c,poll
-            ld    e,plci0
-            call  xdos              ; poll console #0 input
-            in0   a,(RDR0)
-            and   7Fh
-            ret
-
-;console # 0 input status routine
-;
-polci0:
-con0st:     in0   a,(STAT0)         ; Console status
-            and   80h               ; Receive register (ST_RDRF) full?
-            ret   z
-            ld    a,0FFh
-            ret
-      endif
-;
-;console # 0 output handler
-;
-con0out:    in0   a,(STAT0)         ; console output
-            bit   ST_TDRE,a         ; tx ready?
-            jr    nz,tx0rdy
-            push  bc
-            ld    c,poll
-            ld    e,plco0
-            call  xdos              ; poll console #0 output
-            pop   bc
-tx0rdy:     out0  (TDR0),c          ; send it
-            ret
-;
-;console # 0 output status routine
-;
-polco0:     in0   a,(STAT0)         ; Read UART status register of COM port 0.
-            and   02h               ; tx (ST_TDRE) ready?
-            ret   z
-            ld    a,0FFh
-            ret
-; -----------------------------------------------------------------------------
-;	C O N S O L E   1
-
-;console #1 input routine
-;
-con1in      equ   $
-      if  quecon
-            ld    c,readque            ;read queue function
-            ld    de,c1inuqcb          ;point to queue structure
-            call  xdos                 ;call xdos for char
-            ld    a,(char1in)          ;get char from buffer
-            and   7fh                  ;strip parity
-            ret
-;Console #1 Process Descriptor
-c1inpd      equ   $
-            dw    0                    ;pl
-            db    0                    ;status
-            db    32                   ;priority
-            dw    c1instk+18           ;stack pointer
-            db    'C1in    '           ;name of function
-            db    0                    ;console
-            db    0FFh                 ;memseg
-            ds    36
-c1instk:    dw    0c7c7h,0c7c7h,0c7c7h
-            dw    0c7c7h,0c7c7h,0c7c7h
-            dw    0c7c7h,0c7c7h,0c7c7h
-            dw    c1inp                ;starting address
-
-c1inq:      dw    0                    ;ql
-            db    'C1inque '           ;name
-            dw    1                    ;msglen
-            dw    16                   ;nmbmsgs
-            ds    8
-c1inmsgcnt:
-            ds    2                    ;message count
-            ds    16                   ;buffer
-c1inqcb:    dw    c1inq                ;pointer
-            dw    ch1in                ;msg addr.
-ch1in:      db    0
-c1inuqcb:
-            dw    c1inq                ;pointer
-            dw    char1in              ;msg addr.
-char1in:    db    0                    ;char buffer
-;
-polci1      equ   $                    ;return ff if ready
-con1st      equ   $                    ;else, 00 if not
-            ld    a,(c1inmsgcnt)       ;any key pushed
-            or    a                    ;check for a 0
-            ret   z                    ;return if not ready
-            ld    a,0FFh               ;else, return its ready
-            ret
-;
-c1inp:      ld    c,makeque            ;make queue function
-            ld    de,c1inq             ;point to queue
-            call  xdos                 ;call xdos for makeing queue
-c1loop:     ld    c,flagwait           ;set flagwait for char
-            ld    e,7                  ;flag value
-            call  xdos                 ;wait till co in intrp flag
-            ld    c,writeque           ;now write the queue
-            ld    de,c1inqcb           ;point to the buffer area
-            call  xdos                 ;wait till char comes ready
-            jp    c1loop               ;loop till it does.
-;
-      else
-            ld    c,poll
-            ld    e,plci1
-            call  xdos              ; poll console #1 input
-            in0   a,(RDR1)
-            and   7Fh
-            ret
-
-;console # 1 input status routine
-;
-polci1:
-con1st:     in0   a,(STAT1)         ; Console status
-            and   80h               ; Receive register (ST_RDRF) full?
-            ret   z                 ; 00h - not ready
-            ld    a,0FFh            ; FFh - ready
-            ret
-      endif
-;
-;console # 1 output handler
-;
-con1out:    in0   a,(STAT1)         ; console output
-            bit   ST_TDRE,a         ; Test TX Data Register Empty ready bit and
-            jr    nz,tx1rdy
-            push  bc
-            ld    c,poll
-            ld    e,plco1
-            call  xdos              ; poll console #1 output
-            pop   bc
-tx1rdy:     out0  (TDR1),c          ; send it
-            ret
-
-polco1:     in0   a,(STAT1)         ; Read UART status register of COM port 1.
-            and   02h               ; tx (ST_TDRE) ready?
-            ret   z
-            ld    a,0FFh
-            ret
-
-; -----------------------------------------------------------------------------
-;	L I S T   D E V I C E  (in progress)
-
-;pollpt:
-listst:     xor   a
-            ret                     ; 00h - not ready
-
-; Output C on Printer
-list:
-lptout:     call  listst            ; Busy?
-            jr    nz,lptrdy         ; Go if ready
-;            push  bc
-;            ld    c,poll
-;            ld    e,pllpt
-;            call  xdos
-;            pop   bc
-lptrdy:
-            out0  (PIOAD),c         ; Latch data
-            ret
-
-; -----------------------------------------------------------------------------
-; Maximum Console Number
-maxconsole: ld    a,numcns
-            ret
-
-; -----------------------------------------------------------------------------
-; Reg C = device # to be polled
-;	 return 0ffh if ready, 000h if not
-polldevice: ld    a,c
-            cp    numdev
-            jr    c,devok
-            ld    a,numdev
-
-devok:      call  tbljmp            ; jump to dev poll code
-
-devtbl:     dw    poldsk
-            dw    polci0
-            dw    polco0
-            dw    polci1
-            dw    polco1
-numdev      equ   ($-devtbl)/2
-            dw    rtnempty
-
-; -----------------------------------------------------------------------------
-; -----------------------------------------------------------------------------
-; Poll CF Disk
-poldsk:     in    a,(CF_STATUS)     ;Read status register 
-            and   80h               ; A[7] (Busy)
-            xor   80h
-            ret   z
-            ld    a,0FFh
-            ret
-
-; -----------------------------------------------------------------------------
-;       B A N K   S W I T C H I N G
-;    adr of mem descriptor = BC ----> base   1 byte,
-selmemory:  inc   bc                ; size   1 byte,
-            inc   bc                ; attrib 1 byte,
-            inc   bc                ; bank   1 byte.
-            ld    a,(bc)
-selbank:    and   7                 ; bank number
-            or    8                 ; + base adrr (80h)>>4
-            rla 
-            rla
-            rla
-            rla
-            out0  (bbr),a
-            ret
-
-; -----------------------------------------------------------------------------
-startclock: ld    a,0FFh            ; will cause flag #1 to be set
-            ld    (tickn),a         ; at each system time unit tick
-            ret
-
-stopclock:  xor   a                 ; will stop flag #1 setting at
-            ld    (tickn),a         ; system time unit tick
-            ret
-
-exitregion: ld    a,(preemp)
-            or    a
-            ret   nz
-            ei                      ; EI if not preempted or in dispatcher
-            ret
-
-; -----------------------------------------------------------------------------
-;	I N T E R R U P T   H A N D L E R S
-;------------------------------------------------------------------------------
-      if  quecon
-serial0int: di
-            push  af
-            ld    (savsp),sp        ; save stack ptr
-            ld    sp,lstintstk      ; local stack for intr hndl
-            ld    (savhl),hl
-            push  de
-            push  bc
-            push  ix
-            push  iy
-            ld    a,0FFh
-            ld    (preemp),a
-
-            in0   a,(RDR0)
-            ld    (ch0in),a          ; save con: 0 data
-            ld    e,6                ; flag #6
-            jr    concmn
-
-serial1int: di
-            push  af
-            ld    (savsp),sp        ; save stack ptr
-            ld    sp,lstintstk      ; local stack for intr hndl
-            ld    (savhl),hl
-            push  de
-            push  bc
-            push  ix
-            push  iy
-            ld    a,0FFh
-            ld    (preemp),a
-            in0   a,(RDR1)
-            ld    (ch1in),a
-            ld    e,7                ; flag #7
-
-concmn:     ld    c,flagset          ; set flag for ready
-            call  xdos               ; set flag
-            jr    intdone
-      endif
-
-;     code by Hector Peraza
-tickspsec   equ   50
-reload      equ   18432             ; CPU freq/1000
-
-timerint:   di
-            push  af
-            ld    (savsp),sp
-            ld    sp,lstintstk      ; local stack for intr hndl
-            ld    (savhl),hl
-            push  de
-            push  bc
-            push  ix
-            push  iy
-            ld    a,0FFh
-            ld    (preemp),a
-            in0   a,(TCR)
-            in0   a,(TMDR0L)
-            in0   a,(TMDR0H)
-            ld    a,(tickn)         ; test tickn, indicates delayed processes
-            or    a
-            jr    z,notickn
-            ld    c,flagset
-            ld    e,1
-            call  xdos              ; set flag #1 each tick
-
-notickn:    ld    hl,cnt1sec
-            dec   (hl)
-            jr    nz,intdone
-            ld    (hl),tickspsec
-            ld    c,flagset
-            ld    e,2
-            call  xdos              ; set flag #2 @ 1 sec
-
-intdone:    xor   a
-            ld    (preemp),a        ; clear preempted flag
-            pop   iy
-            pop   ix
-            pop   bc
-            pop   de
-            ld    sp,(savsp)        ; restore stack ptr
-            pop   af
-            ld    hl,pdisp          ; MP/M Dispatch -
-            push  hl                ; - put on stack for return
-            ld    hl,(savhl)        ; restore HL
-            reti                    ; clear int and jump to Dispatch
-
-badint:     di
-            ld    sp,lstintstk
-            ld    a,0FFh
-            ld    (preemp),a
-            ld    hl,bintm
-            call  putmsg
-            di
-            halt
-
-bintm:      db    "BadInt",0
-
-;==============================================================================
-;	D I S K - M A N A G E M E N T   F U N C T I O N S
-
 home:       ld    a,(hstwrt)        ; check for pending write
             or    a
             jr    nz,homed
@@ -652,15 +108,14 @@ settrk:     ld    (sektrk),bc       ; Set track passed from BDOS in register BC.
 setsec:     ld    (seksec),bc       ; Set sector passed from BDOS in register BC.
             ret
 ; -----------------------------------------------------------------------------
-
 ; Translate Sector (BC), using table at (DE)
 
 sectran:    ld    h,b
             ld    l,c               ; Null routine: just BC => HL
             ret
 ; -----------------------------------------------------------------------------
-; set dma address given by registers bc
-setdma:     ld    (dmaadr),bc       ; Buffer addr. in BC
+; Set DMA address given by registers bc
+setdma:     ld    (dmaadr),bc       ; buffer addr. in BC
             inc   bc                ; check for flush buffer
             ld    a,b               ; check for b,c = 0
             or    c
@@ -678,7 +133,7 @@ setdma:     ld    (dmaadr),bc       ; Buffer addr. in BC
 ; -----------------------------------------------------------------------------
 seldsk:     ld    hl,0000h          ; Select drive (C): DPH ptr. in HL
             ld    a,c
-            cp    16                ; 16 for 128MB disk
+            cp    numdsk            ; 16 for 128MB disk
             jr    c,chgdsk          ; if invalid drive will give BDOS error
             ld    a,(userdrv)       ; so set the drive back to a:
             cp    c                 ; If the default disk is not the same as the
@@ -698,10 +153,10 @@ chgdsk:     ld    (sekdsk),a
             ld    c,a 
             add   hl,bc             ; hl is the new DPB address
             ret
-
 ;------------------------------------------------------------------------------
-            ;read the selected MP/M sector
-read:       xor   a
+; Read the selected MP/M sector
+; Deblock read routine
+read:      xor   a
             ld    (unacnt),a        ;unacnt = 0
             inc   a
             ld    (readop),a        ;read operation
@@ -710,14 +165,15 @@ read:       xor   a
             ld    (wrtype),a        ;treat as unalloc
             jr    rwoper            ;to perform the read
 ;------------------------------------------------------------------------------
-            ;write the selected MP/M sector
-write:      xor   a                 ;0 to accumulator
+; Write the selected MP/M sector
+; Deblock write routine
+write:     xor   a                 ;0 to accumulator
             ld    (readop),a        ;not a read operation
             ld    a,c               ;write type in c
             ld    (wrtype),a
             cp    wrual             ;write unallocated?
             jr    nz,chkuna         ;check for unalloc
-;
+
 ;                             write to unallocated, set parameters
             ld    a,blksiz/128      ;next unalloc recs
             ld    (unacnt),a
@@ -825,7 +281,7 @@ filhst:     ld    a,(sekdsk)
             call  nz,readhst        ;yes, if 1
             xor   a                 ;0 to accum
             ld    (hstwrt),a        ;no pending write
-            ;     copy data to or from buffer
+            ;copy data to/from buffer
 match:      ld    a,(seksec)        ;mask buffer number
             and   secmsk            ;least signif bits
             ld    h,a
@@ -838,38 +294,13 @@ match:      ld    a,(seksec)        ;mask buffer number
             ld    de,(dmaadr)       ;get/put MP/M data
             ld    a,(readop)        ;which way?
             or    a
-            jr    nz,rwmove         ;skip if read
+            jp    nz,rwmove         ;skip if read
 ;
 ;           write operation, mark and switch direction
             ld    a,1
             ld    (hstwrt),a        ;hstwrt = 1
             ex    de,hl             ;source/dest swap
-;
-            ;BC initially 128, HL is source, DE is dest
-rwmove:     push  de
-            push  hl
-            call  swtuser           ;switch to user context
-            di                      ;disable int
-            ld    bc, 128           ;length of move
-            pop   hl
-            pop   de
-            ldir
-            call  swtsys            ;back to system context
-;
-;                             data has been moved to/from host buffer
-            ld    a,(wrtype)        ;write type
-            cp    wrdir             ;to directory?
-            ld    a,(erflag)        ;in case of errors
-            ret   nz                ;no further processing
-;
-;                             clear host buffer for directory write
-            or    a                 ;errors?
-            ret   nz                ;skip if so
-            xor   a                 ;0 to accum
-            ld    (hstwrt),a        ;buffer written
-            call  writehst
-            ld    a,(erflag)
-            ret
+            jp    rwmove
 
 ;------------------------------------------------------------------------------
 ;Utility subroutine for 16-bit compare
@@ -887,11 +318,71 @@ sektrkcmp:
             cp    (hl)              ;sets flags
             ret
 
-;==============================================================================
+;------------------------------------------------------------------------------
+; Read physical sector from host
+
+readhst:    call  cfWait
+            call  SetLBAadr
+
+            ld    a,CF_READ_SEC
+            out   (CF_COMMAND),a
+
+            call  cfWait
+            ld    hl,hstbuf
+
+         if CFDMA
+            out0  (MAR1H),h         ; Dest mem HL
+            out0  (MAR1L),l
+            ld    bc,512            ; block size
+            out0  (BCR1H),b         ; set up the transfer size
+            out0  (BCR1L),c
+            ld    bc, 1280h         ; +(DCNTL_DIM1&IWI0)*$100+DSTAT_DE1
+            out0  (DCNTL),b         ; DCNTL_DIM1 - I/O fixed to memory++, IWI0 - I/O 1 WS
+            out0  (DSTAT),c         ; DSTAT_DE1 - enable DMA channel 1, no interrupt
+         else
+            ld    bc,CF_DATA
+            inir                    ; input 256 bytes
+            inir                    ; and another 256
+         endif
+            xor   a
+            ld    (erflag),a
+            ret
+
+;------------------------------------------------------------------------------
+; Write physical sector to host
+
+writehst:   call  cfWait
+            call  SetLBAadr
+
+            ld    a,CF_WRITE_SEC
+            out   (CF_COMMAND),a
+
+            call  cfWait
+            ld    hl,hstbuf
+
+         if CFDMA
+            out0  (MAR1H),h         ; Source mem HL
+            out0  (MAR1L),l
+            ld    bc,512            ; block size
+            out0  (BCR1H),b         ; set up the transfer size
+            out0  (BCR1L),c
+            ld    bc, 1080h         ; +(DCNTL_IWI0)*$100+DSTAT_DE1
+            out0  (DCNTL),b         ; DCNTL - memory++ to I/O fixed, IWI0 - I/O 1 WS
+            out0  (DSTAT),c         ; DSTAT_DE1 - enable DMA channel 1, no interrupt
+         else
+            ld    bc,CF_DATA
+            otir                    ; output 256 bytes
+            otir                    ; and another 256
+         endif
+            xor   a
+            ld    (erflag),a
+            ret
+
+;------------------------------------------------------------------------------
 ; Convert track/head/sector into LBA for physical access to the disk
 ; 00Vvvvvv|vvTttttt|tttsssss   some serious bitshifting ahead
 ; code by Rienk H. Koolstra
-;==============================================================================
+
 SetLBAadr:  ld    hl,(hsttrk)       ; 0000000T tttttttt
             ld    a,l               ; tttttttt
             and   07h               ; 00000ttt
@@ -929,123 +420,7 @@ SetLBAadr:  ld    hl,(hsttrk)       ; 0000000T tttttttt
 
             ret    
 
-;==============================================================================
-; Read physical sector from host
-;==============================================================================
-
-readhst:    call  cfWait
-            call  SetLBAadr
-
-            ld    a,CF_READ_SEC
-            out   (CF_COMMAND),a
-
-            call  cfWait
-            ld    hl,hstbuf
-
-         if CFDMA
-            out0  (MAR1H),h         ; Dest mem HL
-            out0  (MAR1L),l
-            ld    bc,512            ; block size
-            out0  (BCR1H),b         ; set up the transfer size
-            out0  (BCR1L),c
-            ld    bc, 1280h         ; +(DCNTL_DIM1&IWI0)*$100+DSTAT_DE1
-            out0  (DCNTL),b         ; DCNTL_DIM1 - I/O fixed to memory++, IWI0 - I/O 1 WS
-            out0  (DSTAT),c         ; DSTAT_DE1 - enable DMA channel 1, no interrupt
-         else
-            ld    bc,CF_DATA
-            inir                    ; input 256 bytes
-            inir                    ; and another 256
-         endif
-            xor   a
-            ld    (erflag),a
-            ret
-
-;==============================================================================
-; Write physical sector to host
-;==============================================================================
-
-writehst:   call  cfWait
-            call  SetLBAadr
-
-            ld    a,CF_WRITE_SEC
-            out   (CF_COMMAND),a
-
-            call  cfWait
-            ld    hl,hstbuf
-
-         if CFDMA
-            out0  (MAR1H),h         ; Source mem HL
-            out0  (MAR1L),l
-            ld    bc,512            ; block size
-            out0  (BCR1H),b         ; set up the transfer size
-            out0  (BCR1L),c
-            ld    bc, 1080h         ; +(DCNTL_IWI0)*$100+DSTAT_DE1
-            out0  (DCNTL),b         ; DCNTL - memory++ to I/O fixed, IWI0 - I/O 1 WS
-            out0  (DSTAT),c         ; DSTAT_DE1 - enable DMA channel 1, no interrupt
-         else
-            ld    bc,CF_DATA
-            otir                    ; output 256 bytes
-            otir                    ; and another 256
-         endif
-            xor   a
-            ld    (erflag),a
-            ret
-
-;==============================================================================
-; Wait for disk to be ready (busy=0,ready=1)
-;==============================================================================
-
-cfWait:     in    a,(CF_STATUS)     ;Read status register
-            bit   7,a               ;Test Busy flag
-            jr    z, cfReady
-            ; High so busy
-            ld    c,poll
-            ld    e,pldsk
-            call  xdos              ; poll CF disk
-
-cfReady:    ret
-
-;==============================================================================
-; Data storage
-;==============================================================================
-
-cnt1sec:    db    tickspsec         ; ticks per second counter
-
-timdbg      ds    1                 ; Timer Debuger
-
-intstk:                             ; local interrupt stack	
-            dw    0c7c7h,0c7c7h,0c7c7h,0c7c7h,0c7c7h
-            dw    0c7c7h,0c7c7h,0c7c7h,0c7c7h,0c7c7h
-            dw    0c7c7h,0c7c7h,0c7c7h,0c7c7h,0c7c7h
-            dw    0c7c7h,0c7c7h,0c7c7h,0c7c7h,0c7c7h
-lstintstk:        
-savsp:      ds    2                 ; saved SP during interrupts
-savhl:      ds    2                 ; saved HL during interrupt handler
-tickn:      db    0                 ; ticking boolean, true = delayed
-preemp:     db    0                 ; preempted boolean
-
-userdrv:    ds    1                 ; Boot-drive number
-
-dirbuf:     ds    128               ;scratch directory area
-
-localData:              ; XIOS workspace
-
-alv00:      ds    257               ;allocation vector 0
-alv01:      ds    257               ;allocation vector 1
-alv02:      ds    257               ;allocation vector 2
-alv03:      ds    257               ;allocation vector 3
-alv04:      ds    257               ;allocation vector 4
-alv05:      ds    257               ;allocation vector 5
-alv06:      ds    257               ;allocation vector 6
-alv07:      ds    257               ;allocation vector 7
-alv08:      ds    257               ;allocation vector 8
-alv09:      ds    257               ;allocation vector 9
-alv10:      ds    257               ;allocation vector 10
-alv11:      ds    257               ;allocation vector 11
-alv12:      ds    257               ;allocation vector 12
-alv13:      ds    257               ;allocation vector 13
-alv14:      ds    257               ;allocation vector 14
-alv15:      ds    257               ;allocation vector 15
+; -----------------------------------------------------------------------------
 
 sekdsk:     ds    1                 ;seek disk number
 sektrk:     ds    2                 ;seek track number
@@ -1069,38 +444,675 @@ rsflag:     ds    1                 ;read sector flag
 readop:     ds    1                 ;1 if read operation
 wrtype:     ds    1                 ;write operation type
 dmaadr:     ds    2                 ;last dma address
+
+alv00:      ds    257               ;allocation vector 0
+alv01:      ds    257               ;allocation vector 1
+alv02:      ds    257               ;allocation vector 2
+alv03:      ds    257               ;allocation vector 3
+alv04:      ds    257               ;allocation vector 4
+alv05:      ds    257               ;allocation vector 5
+alv06:      ds    257               ;allocation vector 6
+alv07:      ds    257               ;allocation vector 7
+alv08:      ds    257               ;allocation vector 8
+alv09:      ds    257               ;allocation vector 9
+alv10:      ds    257               ;allocation vector 10
+alv11:      ds    257               ;allocation vector 11
+alv12:      ds    257               ;allocation vector 12
+alv13:      ds    257               ;allocation vector 13
+alv14:      ds    257               ;allocation vector 14
+alv15:      ds    257               ;allocation vector 15
+
+temp:                               ;systeminit workspace
+
 hstbuf:     ds    512               ;host buffer
 
-; -----------------------------------------------------------------------------
-; Cold-boot code, overlayed by local workspace above
-; -----------------------------------------------------------------------------
+;==============================================================================
+commonbase: jp    coldstart
+swtuser:    jp    $-$
+swtsys:     jp    $-$
+pdisp:      jp    $-$
+xdos:       jp    $-$
+sysdat:     dw    $-$
+;==============================================================================
 
-            org   localData
+; Padding to make sure that the Z180 interrupt table begins on an 32-byte boundary
+padding     equ   (($+1Fh) and 0FFE0h) - $
+; ZSM4 generates an error here which should be ignored.
+            ds    padding
 
-;	B O O T S T R A P   F U N C T I O N S
-; On entry: C, DE = Debuger (not used), HL = BIOS direct jump table address.
-;
-systeminit: di                      ; Disable interrupts
-            xor   a
-            out0  (TCR),a           ; disable timer interrupts and RPT downcounting
-            out0  (STAT0),a         ; disable interrupts ASCI0
-            out0  (STAT1),a         ; disable interrupts ASCI1
-; initialize mmu
-;    Common(0) not used
-;    Bank      0x0000 to 0xAFFF -> 0x80000 to 0x8AFFF 
-;    Common(1) 0xB000 to 0xFFFF -> 0x88000 to 0x8FFFF
-            ld    a, CBASE          ; 44k bank
-            out0  (CBAR),a
-            ld    a, 080h           ; base bank address 0x80000h
-            out0  (BBR),a
-;
-      if  CFDMA
-            ld    a,08h
-            out0  (MAR1B),a         ; set system page
-            ld    bc,CF_DATA
-            out0  (IAR1H),b         ; I/O CF Data reg
-            out0  (IAR1L),c
+itbl:       dw    badint            ;External INT-1 pin
+            dw    badint            ;External INT-2 pin
+            dw    timerint          ;Timer 0
+            dw    badint            ;Timer 1
+            dw    badint            ;DMA Ch-0
+            dw    badint            ;DMA Ch-1
+            dw    badint            ;Clocked serial I/O
+      if  quecon
+            dw    serial0int        ;Asynch. comms. Ch-0
+            dw    serial1int        ;Asynch. comms. Ch-1
+      else
+            dw    badint            ;Asynch. comms. Ch-0
+            dw    badint            ;Asynch. comms. Ch-1
       endif
+
+; -----------------------------------------------------------------------------
+coldstart:
+warmstart:  ld    c,0
+            jp    xdos              ; system reset, terminate process
+
+; -----------------------------------------------------------------------------
+; Disk parameter headers for disk 0 to 15
+; -----------------------------------------------------------------------------
+
+dpbase:     dw    0000h,0000h,0000h,0000h,dirbuf,dpb0,0000h,alv00
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv01
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv02
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv03
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv04
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv05
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv06
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv07
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv08
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv09
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv10
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv11
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv12
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv13
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpb,0000h,alv14
+            dw    0000h,0000h,0000h,0000h,dirbuf,dpbLast,0000h,alv15
+            
+; First drive has a reserved track for MP/M
+
+dpb0:       dw    128               ;SPT - sectors per track
+            db    5                 ;BSH - block shift factor
+            db    31                ;BLM - block mask
+            db    1                 ;EXM - Extent mask
+            dw    2043              ; (2047-4) DSM - Storage size (blocks - 1)
+            dw    511               ;DRM - Number of directory entries - 1
+            db    240               ;AL0 - 1 bit set per directory block
+            db    0                 ;AL1 -            "
+            dw    0                 ;CKS - DIR check vector size (DRM+1)/4 (0=fixed disk)
+            dw    1                 ;OFF - Reserved tracks
+
+dpb:        dw    128               ;SPT - sectors per track
+            db    5                 ;BSH - block shift factor
+            db    31                ;BLM - block mask
+            db    1                 ;EXM - Extent mask
+            dw    2047              ;DSM - Storage size (blocks - 1)
+            dw    511               ;DRM - Number of directory entries - 1
+            db    240               ;AL0 - 1 bit set per directory block
+            db    0                 ;AL1 -            "
+            dw    0                 ;CKS - DIR check vector size (DRM+1)/4 (0=fixed disk)
+            dw    0                 ;OFF - Reserved tracks
+
+; Last drive is smaller because CF is never full 128MB
+dpbLast:    dw    128               ;SPT - sectors per track
+            db    5                 ;BSH - block shift factor
+            db    31                ;BLM - block mask
+            db    1                 ;EXM - Extent mask
+            dw    511               ;DSM - Storage size (blocks - 1) ; 511 = 2MB (for 128MB card)
+            dw    511               ;DRM - Number of directory entries - 1
+            db    240               ;AL0 - 1 bit set per directory block
+            db    0                 ;AL1 -            "
+            dw    0                 ;CKS - DIR check vector size (DRM+1)/4 (0=fixed disk)
+            dw    0                 ;OFF - Reserved tracks
+
+;------------------------------------------------------------------------------
+; Read/write move routine.
+; BC initially 128, HL is source, DE is dest must be in common base memory.
+rwmove:     push  de
+            push  hl
+            call  swtuser           ;switch to user context
+            di                      ;disable int
+            ld    bc, 128           ;length of move
+            pop   hl
+            pop   de
+            ldir
+            call  swtsys            ;back to system context
+;
+;                             data has been moved to/from host buffer
+            ld    a,(wrtype)        ;write type
+            cp    wrdir             ;to directory?
+            ld    a,(erflag)        ;in case of errors
+            ret   nz                ;no further processing
+;
+;                             clear host buffer for directory write
+            or    a                 ;errors?
+            ret   nz                ;skip if so
+            xor   a                 ;0 to accum
+            ld    (hstwrt),a        ;buffer written
+            call  writehst
+            ld    a,(erflag)
+            ret
+
+; -----------------------------------------------------------------------------
+;           I / O   H A N D L E R S 
+
+poll        equ   131               ; XDOS poll function
+makeque     equ   134               ; XDOS make queue
+readque     equ   137               ; XDOS read queue
+writeque    equ   139               ; XDOS write queue
+xdelay      equ   141               ; XDOS delay
+create      equ   144               ; XDOS create process
+flagwait    equ   132
+flagset     equ   133
+dsptch      equ   142
+
+
+pldsk       equ   0                 ; poll CF 
+plci0       equ   1                 ; poll console #0 input
+plco0       equ   2                 ; poll console #0 output
+plci1       equ   3                 ; poll console #1 input
+plco1       equ   4                 ; poll console #1 output
+;pllpt       equ   5                 ; poll LPT     
+
+            ; Console status
+const:      call  ptbljmp           ; compute and jump to hndlr
+            dw    con0st            ; console #0 status routine
+            dw    con1st            ; console #1 status routine
+
+            ; Read console character in
+conin:      call  ptbljmp           ; compute and jump to hndlr
+            dw    con0in            ; console #0 input
+            dw    con1in            ; console #1 input
+
+            ; Write console character out
+conout:     call  ptbljmp           ; compute and jump to hndlr
+            dw    con0out           ; console #0 output
+            dw    con1out           ; console #1 output
+
+ptbljmp:    ld    a,d               ; compute and jump to handler,
+            cp    numcns            ; d = console #, preserve it
+            jr    c,tbljmp
+            pop   af                ; throw away table address
+rtnempty:   xor   a
+            ret
+tbljmp:     add   a,a
+            pop   hl
+            ld    e,a
+            ld    d,0
+            add   hl,de
+            ld    e,(hl)
+            inc   hl
+            ld    d,(hl)
+            ex    de,hl
+            jp    (hl)              ; jump to computed cns handler
+
+; -----------------------------------------------------------------------------
+; Reg C = device # to be polled
+;         return 0ffh if ready, 000h if not
+polldevice: ld    a,c
+            cp    numdev
+            jr    c,devok
+            ld    a,numdev
+
+devok:      call  tbljmp            ; jump to dev poll code
+
+devtbl:     dw    poldsk
+            dw    polci0
+            dw    polco0
+            dw    polci1
+            dw    polco1
+
+numdev      equ   ($-devtbl)/2
+            dw    rtnempty
+
+; -----------------------------------------------------------------------------
+; Poll CF Disk
+poldsk:     in    a,(CF_STATUS)     ;Read status register 
+            and   80h               ; A[7] (Busy)
+            xor   80h
+            ret   z
+            ld    a,0FFh
+            ret
+
+;------------------------------------------------------------------------------
+; Wait for disk to be ready (busy=0,ready=1)
+
+cfWait:     in    a,(CF_STATUS)     ;Read status register
+            bit   7,a               ;Test Busy flag
+            jr    z, cfReady
+            ; High so busy
+            ld    c,poll
+            ld    e,pldsk
+            call  xdos              ; poll CF disk
+
+cfReady:    ret
+
+; -----------------------------------------------------------------------------
+;           C O N S O L E   0
+
+;console #0 input routine
+;
+con0in:     equ   $
+      if  quecon
+            ld    c,readque            ;read queue function
+            ld    de,c0inuqcb          ;point to queue structure
+            call  xdos                 ;call xdos for char
+            ld    a,(char0in)          ;get char from buffer
+            and   7fh                  ;strip parity
+            ret
+
+;Console #0 process descriptor
+c0inpd      equ   $
+            dw    c1inpd               ;pl
+            db    0                    ;status
+            db    32                   ;priority
+            dw    c0instk+18           ;stack pointer
+            db    'c0in    '           ;name of function
+            db    0                    ;console
+            db    0FFh                 ;memseg
+            ds    36
+c0instk:    dw    0c7c7h,0c7c7h,0c7c7h
+            dw    0c7c7h,0c7c7h,0c7c7h
+            dw    0c7c7h,0c7c7h,0c7c7h
+            dw    c0inp                ;starting address
+
+;Console #0 input queue
+c0inq:      dw    0                    ;ql
+            db    'c0inque '           ;name
+            dw    1                    ;msglen
+            dw    16                   ;nmbmsgs
+            ds    8
+c0inmsgcnt: ds    2                    ;message count
+            ds    16                   ;buffer
+
+c0inqcb:    dw    c0inq                ;pointer
+            dw    ch0in                ;msg addr.
+ch0in:      db    0
+
+c0inuqcb:   dw    c0inq                ;pointer
+            dw    char0in              ;msg addr.
+char0in:    db    0                    ;char buffer
+;
+polci0      equ   $                    ;return ff if ready
+con0st      equ   $                    ;else, 00 if not
+            ld    a,(c0inmsgcnt)       ;any key pushed
+            or    a                    ;check for a 0
+            ret   z                    ;return if not ready
+            ld    a,0FFh               ;else, return its ready
+            ret
+;
+c0inp:      ld    c,makeque            ;make queue function
+            ld    de,c0inq             ;point to queue
+            call  xdos                 ;call xdos for makeing queue
+c0loop:     ld    c,flagwait           ;set flagwait for char
+            ld    e,6                  ;flag value
+            call  xdos                 ;wait till co in intrp flag
+            ld    c,writeque           ;now write the queue
+            ld    de,c0inqcb           ;point to the buffer area
+            call  xdos                 ;wait till char comes ready
+            jp    c0loop               ;loop till it does.
+;
+      else
+            ld    c,poll
+            ld    e,plci0
+            call  xdos              ; poll console #0 input
+            in0   a,(RDR0)
+            and   7Fh
+            ret
+
+;console # 0 input status routine
+;
+polci0:
+con0st:     in0   a,(STAT0)         ; Console status
+            and   80h               ; Receive register (ST_RDRF) full?
+            ret   z
+            ld    a,0FFh
+            ret
+      endif
+;
+;console # 0 output handler
+;
+con0out:    in0   a,(STAT0)         ; console output
+            bit   ST_TDRE,a         ; tx ready?
+            jr    nz,tx0rdy
+            push  bc
+            ld    c,poll
+            ld    e,plco0
+            call  xdos              ; poll console #0 output
+            pop   bc
+tx0rdy:     out0  (TDR0),c          ; send it
+            ret
+;
+;console # 0 output status routine
+;
+polco0:     in0   a,(STAT0)         ; Read UART status register of COM port 0.
+            and   02h               ; tx (ST_TDRE) ready?
+            ret   z
+            ld    a,0FFh
+            ret
+; -----------------------------------------------------------------------------
+;           C O N S O L E   1
+
+;console #1 input routine
+;
+con1in      equ   $
+      if  quecon
+            ld    c,readque            ;read queue function
+            ld    de,c1inuqcb          ;point to queue structure
+            call  xdos                 ;call xdos for char
+            ld    a,(char1in)          ;get char from buffer
+            and   7fh                  ;strip parity
+            ret
+;Console #1 Process Descriptor
+c1inpd      equ   $
+            dw    0                    ;pl
+            db    0                    ;status
+            db    32                   ;priority
+            dw    c1instk+18           ;stack pointer
+            db    'c1in    '           ;name of function
+            db    0                    ;console
+            db    0FFh                 ;memseg
+            ds    36
+c1instk:    dw    0c7c7h,0c7c7h,0c7c7h
+            dw    0c7c7h,0c7c7h,0c7c7h
+            dw    0c7c7h,0c7c7h,0c7c7h
+            dw    c1inp                ;starting address
+
+c1inq:      dw    0                    ;ql
+            db    'c1inque '           ;name
+            dw    1                    ;msglen
+            dw    16                   ;nmbmsgs
+            ds    8
+c1inmsgcnt:
+            ds    2                    ;message count
+            ds    16                   ;buffer
+c1inqcb:    dw    c1inq                ;pointer
+            dw    ch1in                ;msg addr.
+ch1in:      db    0
+c1inuqcb:
+            dw    c1inq                ;pointer
+            dw    char1in              ;msg addr.
+char1in:    db    0                    ;char buffer
+;
+polci1      equ   $                    ;return ff if ready
+con1st      equ   $                    ;else, 00 if not
+            ld    a,(c1inmsgcnt)       ;any key pushed
+            or    a                    ;check for a 0
+            ret   z                    ;return if not ready
+            ld    a,0FFh               ;else, return its ready
+            ret
+;
+c1inp:      ld    c,makeque            ;make queue function
+            ld    de,c1inq             ;point to queue
+            call  xdos                 ;call xdos for makeing queue
+c1loop:     ld    c,flagwait           ;set flagwait for char
+            ld    e,7                  ;flag value
+            call  xdos                 ;wait till co in intrp flag
+            ld    c,writeque           ;now write the queue
+            ld    de,c1inqcb           ;point to the buffer area
+            call  xdos                 ;wait till char comes ready
+            jp    c1loop               ;loop till it does.
+;
+      else
+            ld    c,poll
+            ld    e,plci1
+            call  xdos              ; poll console #1 input
+            in0   a,(RDR1)
+            and   7Fh                  ; strip parity
+            ret
+
+;console # 1 input status routine
+;
+polci1:
+con1st:     in0   a,(STAT1)         ; Console status
+            and   80h               ; Receive register (ST_RDRF) full?
+            ret   z                 ; 00h - not ready
+            ld    a,0FFh            ; FFh - ready
+            ret
+      endif
+;
+;console # 1 output handler
+;
+con1out:    in0   a,(STAT1)         ; console output
+            bit   ST_TDRE,a         ; Test TX Data Register Empty ready bit and
+            jr    nz,tx1rdy
+            push  bc
+            ld    c,poll
+            ld    e,plco1
+            call  xdos              ; poll console #1 output
+            pop   bc
+tx1rdy:     out0  (TDR1),c          ; send it
+            ret
+
+polco1:     in0   a,(STAT1)         ; Read UART status register of COM port 1.
+            and   02h               ; tx (ST_TDRE) ready?
+            ret   z
+            ld    a,0FFh
+            ret
+
+; -----------------------------------------------------------------------------
+;	L I S T   D E V I C E  (in progress)
+
+; List Device Status
+
+;pollpt:
+listst:     xor   a
+            ret                     ; 00h - not ready
+
+; Output C on Printer
+list:
+lptout:     call  listst            ; Busy?
+            jr    nz,lptrdy         ; Go if ready
+;            push  bc
+;            ld    c,poll
+;            ld    e,pllpt
+;            call  xdos
+;            pop   bc
+lptrdy:
+            out0  (PIOAD),c         ; Latch data
+            ret
+
+; -----------------------------------------------------------------------------
+; Maximum Console Number
+maxconsole: ld    a,numcns
+            ret
+
+; -----------------------------------------------------------------------------
+;       B A N K   S W I T C H I N G
+;    adr of mem descriptor = BC ----> base   1 byte,
+selmemory:  inc   bc                ; size   1 byte,
+            inc   bc                ; attrib 1 byte,
+            inc   bc                ; bank   1 byte.
+            ld    a,(bc)
+selbank:    and   7                 ; bank number
+            or    8                 ; + base adrr (80h)>>4
+            rla 
+            rla
+            rla
+            rla
+            out0  (bbr),a
+            ret
+
+;----------------------------------------------------------------
+startclock: ld    a,0FFh            ; will cause flag #1 to be set
+            ld    (tickn),a         ; at each system time unit tick
+            ret
+
+stopclock:  xor   a                 ; will stop flag #1 setting at
+            ld    (tickn),a         ; system time unit tick
+            ret
+
+exitregion: ld    a,(preemp)
+            or    a
+            ret   nz
+            ei                      ; EI if not preempted or in dispatcher
+            ret
+
+; -----------------------------------------------------------------------------
+;	I N T E R R U P T   H A N D L E R S
+;------------------------------------------------------------------------------
+      if  quecon
+serial0int: di
+            push  af
+            ld    (savsp),sp        ; save stack ptr
+            ld    sp,lstintstk      ; local stack for intr hndl
+            ld    (savhl),hl
+            push  de
+            push  bc
+            push  ix
+            push  iy
+            ld    a,0FFh
+            ld    (preemp),a
+
+            in0   a,(RDR0)
+            ld    (ch0in),a          ; save con: 0 data
+            ld    e,6                ; flag #6
+            jr    concmn
+
+serial1int: di
+            push  af
+            ld    (savsp),sp        ; save stack ptr
+            ld    sp,lstintstk      ; local stack for intr hndl
+            ld    (savhl),hl
+            push  de
+            push  bc
+            push  ix
+            push  iy
+            ld    a,0FFh
+            ld    (preemp),a
+            in0   a,(RDR1)
+            ld    (ch1in),a
+            ld    e,7                ; flag #7
+
+concmn:     ld    c,flagset          ; set flag for ready
+            call  xdos               ; set flag
+            jr    intdone
+      endif
+
+;     code by Hector Peraza
+tickspsec   equ   50
+reload      equ   18432             ; CPU freq/1000
+
+timerint:   di
+            push  af
+            ld    (savsp),sp    ; save stack ptr
+            ld    sp,lstintstk      ; local stack for intr hndl
+            ld    (savhl),hl
+            push  de
+            push  bc
+            push  ix
+            push  iy
+            ld    a,0FFh
+            ld    (preemp),a
+            in0   a,(TCR)
+            in0   a,(TMDR0L)
+            in0   a,(TMDR0H)
+            ld    a,(tickn)         ; test tickn, indicates delayed processes
+            or    a
+            jr    z,notickn
+            ld    c,flagset
+            ld    e,1
+            call  xdos              ; set flag #1 each tick
+
+notickn:    ld    hl,cnt1sec
+            dec   (hl)
+            jr    nz,intdone
+            ld    (hl),tickspsec
+            ld    c,flagset
+            ld    e,2
+            call  xdos              ; set flag #2 @ 1 sec
+
+intdone:    xor   a
+            ld    (preemp),a        ; clear preempted flag
+            pop   iy
+            pop   ix
+            pop   bc
+            pop   de
+            ld    sp,(savsp)        ; restore stack ptr
+            pop   af
+            ld    hl,pdisp          ; MP/M Dispatch -
+            push  hl                ; - put on stack for return
+            ld    hl,(savhl)        ; restore HL
+            reti                    ; clear int and jump to Dispatch
+
+badint:     di
+            ld    sp,lstintstk
+            ld    a,0FFh
+            ld    (preemp),a
+            ld    hl,bintm
+            call  putmsg
+            di
+            halt
+
+bintm:      db    "BadInt",0
+
+; -----------------------------------------------------------------------------
+; output ASCII on console 0
+
+putmsg:     ld    a,(hl)            ; Affects A, C, HL
+            and   a
+            ret   z                 ; Zero terminates
+
+            ld    c,a               ; Display 1 char.
+conoutA:    in0   a,(STAT0)         ; console 0 status
+            bit   ST_TDRE,a         ; tx empty?
+            jr    z,conoutA         ; No, so keep waiting
+            out0  (TDR0),c          ; Write byte to serial port
+            inc   hl
+            jr    putmsg
+
+;------------------------------------------------------------------------------
+systeminit: di                      ; Disable interrupts
+            ld    a, cbase          ; bank size
+            out0  (CBAR),a          ; Common(1) cbase*256 to 0xFFFF
+            ld    a, 080h           ; Base bank address 0x80000h
+            out0  (BBR),a
+            jp    setup
+
+;==============================================================================
+
+cnt1sec:    db    tickspsec         ; ticks per second counter
+
+timdbg      ds    1                 ; Timer Debuger
+
+intstk:                             ; local interrupt stack	
+            dw    0c7c7h,0c7c7h,0c7c7h,0c7c7h,0c7c7h
+            dw    0c7c7h,0c7c7h,0c7c7h,0c7c7h,0c7c7h
+            dw    0c7c7h,0c7c7h,0c7c7h,0c7c7h,0c7c7h
+            dw    0c7c7h,0c7c7h,0c7c7h,0c7c7h,0c7c7h
+lstintstk:        
+savsp:      ds    2                 ; saved SP during interrupts
+savhl:      ds    2                 ; saved HL during interrupt handler
+tickn:      db    0                 ; ticking boolean, true = delayed
+preemp:     db    0                 ; preempted boolean
+
+userdrv:    ds    1                 ; Boot-drive number
+
+dirbuf:     ds    128               ;scratch directory area
+
+;
+;------------------------------------------------------------------------------
+; Cold-boot code, overlayed by disk buffer
+; -----------------------------------------------------------------------------
+            org   temp
+sysorg      equ   0000h
+Welcome:    db    CR,LF,"Banked XIOS v1.5 for RCBus by T.Pycio 2023",CR,0
+
+; System Initialization. The following registers are input parameters:
+; <C>   MP/M debugger restart #
+; <DE>  MP/M entry point address for the debugger.
+;       Place a jump at the proper debugger restart location to the address
+;       contained in <DE>.
+; <HL>  BIOS direct jump table address.
+;       Place a jump instruction at location 0000H
+;       in each bank's base page to the address contained in <HL>
+;------------------------------------------------------------------------------
+
+setup:      ld    a,0C3h            ; jump inst.
+            ld    (vect*8),a        ; rst vector # * 8
+            ld    (sysorg),a        ; at 0: jp <HL>
+            ld    (sysorg+1),hl     ; BIOS direct jump table address
+            ld    a,c               ; rst vector
+            rla
+            rla
+            rla                     ; * 8
+            ld    h,0
+            ld    l,a               ; debugger restart address
+            ld    (hl),e
+            inc   hl
+            ld    (hl),d
 
             xor   a                 ; Cold Start
             ld    (userdrv),a       ; Start from the boot disk (Drive A:, User 0)
@@ -1112,7 +1124,37 @@ systeminit: di                      ; Disable interrupts
             ld    hl,tpabuf         ; Address of BIOS DMA buffer.
             ld    (dmaadr),hl
 
+; initialize MP/M banks
+            ld    hl,0
+            ld    de,alv15          ; use the disk15 as storage area
+            ld    bc,64             ; copy the first 64 bytes (contains XIOS and
+            ldir                    ; BDOS vectors, etc.)
+            ld    a, numbnk         ; number of banks
+inib2:      push  af
+            call  selbank
+            ld    hl,alv15
+            ld    de,0
+            ld    bc,64
+            ldir
+            pop   af
+            dec   a
+            jr    nz,inib2
+            call  selbank           ; switch bank 0 back in
+
 ; init hardware
+            xor   a
+            out0  (TCR),a           ; disable timer interrupts and RPT downcounting
+            out0  (STAT0),a         ; disable interrupts ASCI0
+            out0  (STAT1),a         ; disable interrupts ASCI1
+;
+      if  CFDMA
+            ld    a,08h
+            out0  (MAR1B),a         ; set system page
+            ld    bc,CF_DATA
+            out0  (IAR1H),b         ; I/O CF Data reg
+            out0  (IAR1L),c
+      endif
+
     ; Z180 ASCI0 config
             ld    a,064h            ; RE,TE,8,N,1
             out0  (CNTLA0),a
@@ -1132,26 +1174,9 @@ systeminit: di                      ; Disable interrupts
     ; Paraller Port (not implemented)
             ld    a, 00001111b      ; Set output PIO PortA
             out   (PIOAC), a
-
 ; welcome message
             ld    hl,Welcome
             call  PutMsg            ; print welcome banner
-; initialize MP/M banks
-            ld    hl,0
-            ld    de,Welcome        ; use the welcome message as storage area
-            ld    bc,64             ; copy the first 64 bytes (contains XIOS and
-            ldir                    ; BDOS vectors, etc.)
-            ld    a, numbnk         ; number of banks
-inib2:      push  af
-            call  selbank
-            ld    hl,Welcome
-            ld    de,0
-            ld    bc,64
-            ldir
-            pop   af
-            dec   a
-            jr    nz,inib2
-            call  selbank           ; switch bank 0 back in
 
       if  quecon
             ld    c,create          ; create process
@@ -1176,7 +1201,5 @@ inib2:      push  af
             out0  (ITC),a
             ei
             ret
-
-Welcome:    db   CR,LF,"Banked XIOS v1.42 for RCBus by T.Pycio 2023",CR,0
 
             end
