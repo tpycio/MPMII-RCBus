@@ -1,4 +1,4 @@
-            TITLE 'Loader MP/M II for RC2014'
+            TITLE 'Loader MP/M II for RCBus'
             .Z180
 ;******************************************************************************
 ;******************************************************************************
@@ -8,15 +8,23 @@
 ;**                                                                          **
 ;******************************************************************************
 ;******************************************************************************
-;  Build:   ZSM LDRBIOS,LDRBIOS=LDRBIOS.Z80                       
-;           LINK LDRBIOS.BIN=LDRBIOS[NR,L1700]                    
-;                                                                 
-;  Revision History:                                              
-;  Rev    Date         Author                Comments             
-;  1.00   29-09-2021   Tadeusz Pycio         Created              
-;                                                                 
+;  Build:   ZSM LDRBIOS,LDRBIOS=LDRBIOS.Z80                            
+;           LINK LDRBIOS.BIN=LDRBIOS[NR,L1700]                         
+;                                                                      
+;  Revision History:                                                   
+;  Rev    Date         Author           Comments                       
+;  1.00   29-09-2021   Tadeusz Pycio    Created                        
+;  1.10   16-01-2024   Tadeusz Pycio    Adding support for Z80 with SIO
 ;******************************************************************************
 
+false       equ   0
+true        equ   not false
+
+MPU180      equ   true
+rc2014      equ   false
+
+      if  MPU180
+            .Z180
 BASE_IO      equ   0C0h             ;Z180 internal register base address
 
 CNTLA0       equ   BASE_IO + 00h    ;ASCI Channel Control Register A chan 0
@@ -50,6 +58,30 @@ ICR          equ   BASE_IO + 3Fh    ;I/O Control Register
 
 ST_RDRF      equ   7                ;Receive data register Full
 ST_TDRE      equ   1                ;Transmit data register empty
+
+      else
+            .Z80
+
+SIO         equ   080h          ; base address SIO
+
+      if    rc2014
+; Z80 SIO addresses used by RC2014 official module
+SIOA_D      equ   SIO+1         ; Serial port A Data
+SIOA_C      equ   SIO           ; Serial port A Control
+SIOB_D      equ   SIO+3         ; Serial port B Data
+SIOB_C      equ   SIO+2         ; Serial port B Control
+      else
+; Z80 SIO addresses used by Zilog
+SIOA_D      equ   SIO           ; Serial port A Data
+SIOA_C      equ   SIO+2         ; Serial port A Control
+SIOB_D      equ   SIO+1         ; Serial port B Data
+SIOB_C      equ   SIO+3         ; Serial port B Control
+      endif
+; RR0:
+DAV         equ   0             ; Data available
+TBMT        equ   2             ; Transmit buffer empty
+
+      endif                     ;CPU type
 
 ; *****************************************************************************
 
@@ -151,6 +183,7 @@ listst:
 ; -----------------------------------------------------------------------------
 ; console in/out routines
 ;
+      if  MPU180
 const:      in0   a,(STAT0)         ;Read serial port status register
             bit   ST_RDRF,a         ;Receive register full?
             jr    z,constNone       ;Skip if no character available
@@ -159,13 +192,31 @@ const:      in0   a,(STAT0)         ;Read serial port status register
 constNone:  ld    a,0               ;Character not available
             ret	    
 
-; -----------------------------------------------------------------------------
 conout:     in0   a,(STAT0)         ;Read serial port status register
             bit   ST_TDRE,a         ;Transmit register empty?
             jr    z,conout          ;No, so keep waiting
             out0  (TDR0), c         ;Write byte to serial port
             ret
+      else
+const:      xor   a
+            out   (SIOA_C), a       ; Select RR0
+            in    a,(SIOA_C)        ; Read UART status register of COM Port 1.
+            bit   DAV,a             ; Test character ready bit and loop
+            jr    z,constNone       ;Skip if no character available
+            ld    a,0FFh            ;Character is available
+            ret
+constNone:  ld    a,0               ;Character not available
+            ret
 
+conout:     xor   a
+            out   (SIOA_C), a       ; Select RR0
+conout1:    in    a,(SIOA_C)        ; Read UART status register of COM port 1.
+            bit   TBMT, a           ; Test TX Data Register Empty ready bit and
+            jr   z,conout1          ; loop until TX buffer is empty.
+            ld    a,c
+            out   (SIOA_D), A       ; TX the character.
+            ret                     ; Done.
+      endif
 ;==============================================================================
 ; Disk processing entry points
 ;==============================================================================
@@ -280,8 +331,9 @@ filhst:     ld    a,(sekdsk)
 match:      ld    a,(seksec)        ;mask buffer number
             and   secmsk            ;least signif bits
             ld    h,a
-            ld    l,128
-            mlt   hl
+            ld    l,0
+            srl   h
+            rr    l                 ;HL = L << 7
 ;                               hl has relative host buffer address
             ld    de,hstbuf
             add   hl,de             ;hl = host address
@@ -343,7 +395,7 @@ SetLBAadr:  ld    hl,(hsttrk)       ; 0000000T tttttttt
             ld    b,a
             ld    a,(hstsec)        ; 000sssss
             or    b                 ; tttsssss
-            ld    (lba0),a
+            out   (CF_LBA0),a
 
             ld    a,l               ; tttttttt
             and   0F8h              ; ttttt000
@@ -358,23 +410,14 @@ SetLBAadr:  ld    hl,(hsttrk)       ; 0000000T tttttttt
             ld    c,a
             and   0C0h              ; vv000000
             or    b                 ; vvTttttt
-            ld    (lba1),a
+            out   (CF_LBA1),a
 
             ld    a,c               ; vvVvvvvv
             and   3Fh               ; 00Vvvvvv
-            ld    (lba2),a
-
-; LBA Mode using drive 0 = E0
-            ld    a,0E0H
-            ld    (lba3),a
-            ld    a,(lba0)
-            out   (CF_LBA0),a
-            ld    a,(lba1)
-            out   (CF_LBA1),a
-            ld    a,(lba2)
             out   (CF_LBA2),a
-            ld    a,(lba3)
-            out   (CF_LBA3),a
+            ld    a,0E0H
+            ld    (CF_LBA3),a       ; LBA Mode using drive 0 = E0
+
             ld    a,1
             out   (CF_SECCOUNT),a
 
@@ -384,11 +427,7 @@ SetLBAadr:  ld    hl,(hsttrk)       ; 0000000T tttttttt
 ; Read physical sector from host
 ;==============================================================================
 
-readhst:    push  af
-            push  bc
-            push  hl
-
-            call  cfWait
+readhst:    call  cfWait
             call  setLBAadr
 
             ld    a,CF_READ_SEC
@@ -400,10 +439,6 @@ readhst:    push  af
             ld    c,CF_DATA
             inir                    ; input 256 bytes
             inir                    ; and another 256
-
-            pop   hl
-            pop   bc
-            pop   af
 
             xor   a
             ld    (erflag),a
@@ -438,11 +473,6 @@ TstReady:   in    a,(CF_STATUS)     ;Read status register
 dirbuf:     ds    128               ;scratch directory area
 alv00:      ds    257               ;allocation vector 0
 
-lba0:       db    00h
-lba1:       db    00h
-lba2:       db    00h
-lba3:       db    00h
-
 sekdsk:     ds    1                 ;seek disk number
 sektrk:     ds    2                 ;seek track number
 seksec:     ds    2                 ;seek sector number
@@ -463,9 +493,5 @@ readop:     ds    1                 ;1 if read operation
 wrtype:     ds    1                 ;write operation type
 dmaadr:     ds    2                 ;last dma address
 hstbuf:     ds    512               ;host buffer
-
-biosend     equ   $
-
-;           .dephase
 
             END
