@@ -1,0 +1,74 @@
+$title ('SDIR - Arithmetic')
+
+/*
+  Copyright (C) 1981
+  Digital Research
+  P.O. Box 579
+  Pacific Grove, CA 93950
+
+  Revised:
+    14 Sept 81 by Danny Horovitz
+*/
+
+darithmetic:
+do;
+             /* arithmetic module for extended directory */
+
+             /* commonly used macros */
+
+declare dcl literally 'declare',
+        lit literally 'literally',
+        word lit 'address',
+        true literally '1',
+        false literally '0',
+        boolean literally 'byte',
+        cr literally '13',
+        lf literally '10';
+
+add3byte: procedure(byte3adr,num) public;
+      dcl (byte3adr,num) address,
+          b3 based byte3adr structure (
+          lword address,
+          hbyte byte),
+          temp address;
+
+      temp = b3.lword;
+      if (b3.lword := b3.lword + num) < temp then             /* overflow */
+          b3.hbyte = b3.hbyte + 1;
+end add3byte;
+
+            /* add three byte number to 3 byte value structure */
+add3byte3: procedure(totalb,numb) public;
+      dcl (totalb,numb) address,
+          num baseä numâ structurå (
+          lword address,
+          hbyte byte),
+          total based totalb structure (
+          lword address,
+          hbyte byte);
+
+      calì add3byte(totalb,num.lword);
+      total.hbyte = num.hbyte + total.hbyte;
+end add3byte3;
+
+                                                /* divide 3 byte value by 8 */
+shr3byte: procedure(byte3adr) public;
+    dcl byte3adr address,
+        b3 based byte3adr structure (
+        lword address,
+        hbyte byte),
+        temp1 based byte3adr (2) byte,
+        temp2 byte;
+
+        temp2  = ror(b3.hbyte,3) and 11100000b;  /* get 3 bits              */
+        b3.hbyte = shr(b3.hbyte,3);
+        b3.lword = shr(b3.lword,3);
+        temp1(1) = temp1(1) or temp2;            /* or in 3 bits from hbyte */
+end shr3byte;
+
+end darithmetic;
+                                                                      
+                                    
+
+                                                                      
+              

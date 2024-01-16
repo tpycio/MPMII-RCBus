@@ -1,0 +1,570 @@
+$title ('SDIR - Show')
+
+/*
+  Copyright (C) 1981
+  Digital Research
+  P.O. Box 579
+  Pacific Grove, CA 93950
+
+  Revised:
+    14 Sept 81 by Danny Horovitz
+*/
+
+dshow:
+do;
+               /* display module for extended directory */
+
+               /* commonly used macros                  */
+
+declare dcl literally 'declare',
+        lit literally 'literally',
+        true literally '1',
+        false literally '0',
+        boolean literally 'byte',
+        cr literally '13',
+        lf literally '10',
+        ff literally '12';
+
+dcl buff(128) byte external,
+    fcb (35) byte external;
+
+dcl (cur$drv, cur$usr) byte external;
+
+dcl (os,bdos) byte external,
+    bdos20 lit '20H',
+    bdos30 lit '30H',
+    mpm    lit '10H';
+
+dcl used$de address external;        /* number of used directory entries */
+
+dcl sorted boolean external;
+dcl filesfound address external;
+
+dcl search$ops address external,     /* search options                      */
+    s$dir  lit '1',
+    s$sys  lit '2',
+    s$ro   lit '4',
+    s$rw   lit '8',
+    s$xfcb lit '32',            /* show files with xfcbs                    */
+    s$nonxfcb lit '64',         /*  "     "   without xfcbs                 */
+    s$exclude lit '128';
+
+dcl format byte external,       /* format is one of the following */
+    page$len address external,  /* page size before printing new headers */
+    message boolean external,   /* print titles and msg when no file found */
+    formfeeds boolean external, /* use form feeds to separate headers */
+    form$short lit '0', 
+    form$size lit '1',
+    form$full lit '2';
+
+dcl file$displayed boolean public initial (false);
+
+declare                       /* directory label: special case of XFCB */
+    dirlabel byte external,
+    dirlabeltype       lit '20',        /* identifier on disk          */
+    dl$databyte        lit '12',        /* data byte                   */
+    dl$password        lit '128',       /* masks on data byte          */
+    dl$access          lit '64',
+    dl$update          lit '32',
+    dl$makexfcb        lit '16',
+    dl$exists          lit '1';
+
+dcl
+        buf$fcb$adr address external,       /* index into directory buffer  */
+        buf$fcb based buf$fcb$adr (32) byte,
+                                            /* fcb template for dir         */
+
+        (f$i$adr,last$f$i$adr,end$adr) address external,
+        cur$file address,                   /* number of file currently     */
+                                            /* being displayed              */
+
+                                            /* structure of file info       */ 
+        file$info based f$i$adr structure(
+            usr byte,
+            name (8) byte,
+            type (3) byte,
+            bytes address,        /* byte count (mod kilobyte)        */
+            kbytes address,       /* kilobyte count                   */
+            recs$lword address,   /* record count is 3 byte value     */
+            recs$hbyte byte,      /* low word, high byte              */
+            hash$link address,
+            x$i$adr address),     /* index into time stamp array for  */
+                                  /* this file                        */
+
+        x$i$adr address external,
+        xfcb$info based x$i$adr structure (
+            create (4) byte,
+            update (4) byte,
+            passmode byte);
+
+dcl     f$i$indices$base address external,  /* if sorted then f$i$indices   */
+        f$i$indices based f$i$indices$base (1) address; /* are here         */
+
+dcl dpb$adr address external,        /* disk parameter block address        */
+    dpb based dpb$adr structure
+        (spt address, blkshf byte, blkmsk byte, extmsk byte, blkmax address,
+         dirmax address, dirblk address, chksiz address, offset address);
+
+printchar: procedure (char) external;
+    dcl char byte;
+end printchar;
+
+print: procedure (string$adr) external;      /* BDOS call # 9               */
+    dcl string$adr address;
+end print;
+
+search$first: procedure(fcb$adr) byte external;
+    dcl fcb$adr address;
+end search$first;
+
+search$next: procedure byte external;
+end search$next;
+
+break: procedure external;
+end break;
+
+display$time$stamp: procedure (ts$adr) external;     /* in dts.plm */
+    dcl ts$adr address;
+end display$time$stamp;
+
+printb: procedure external;
+end printb;
+
+crlf: procedure external;
+end crlf;
+
+printfn: procedure(fname$adr) external;
+    dcl fname$adr address;
+end printfn;
+
+pdecimal: procedure(v,prec,zerosup) external;
+                       /* print value val, field size = (log10 prec) + 1  */
+                       /* with leading zero suppression if zerosup = true */
+    declare v address,                           /* value to print        */
+            prec address,                        /* precision             */
+            zerosup boolean;                     /* zero suppression flag */
+end pdecimal;
+
+p3byte: procedure(byte3adr,prec)external;
+                                /* print 3 byte value with 0 suppression */
+      dcl (byte3adr,prec) address; /* assume high order bit is < 10         */
+end p3byte;
+
+terminate: procedure external;
+end terminate;
+
+match: procedure boolean external;
+    dcl fcb$adr address;
+end match;
+
+add3byte: procedure (byte3$adr,word$amt) external;
+    dcl (byte3$adr, word$amt) address;
+end add3byte;            /* add word to 3 byte structure */
+
+add3byte3: procedure (byte3$adr,byte3) external;
+    dcl (byte3$adr, byte3) address;
+end add3byte3;            /* add 3 byte quantity to 3 byte total */
+
+shr3byte: procedure (byte3$adr) external;
+    dcl byte3$adr address;
+end shr3byte;
+
+set$drive: procedure external;
+end set$drive;
+
+/* routines local to this module */
+
+dcl     total$kbytes structure (    /* grand total k bytes of files matched */
+          lword address,
+          hbyte byte),
+        total$recs structure (      /* grand total records of files matched */
+          lword address,
+          hbyte byte),
+        total$1k$blocks structure(  /* how many 1k blocks are allocated     */
+          lword address,
+          hbyte byte);
+ 
+add$totals: procedure;
+dcl temp structure (lword address, hbyte byte);
+
+    call add3byte(.total$kbytes,file$info.kbytes);
+    if file$info.bytes > 0 then           /* round up to nearest k */
+        call add3byte(.total$kbytes,1);   /* actual disk space allocated */
+
+    call add3byte3(.total$recs,.file$info.recs$lword); /* records in file */
+    temp.lword = file$info.recs$lword;
+    temp.hbyte = file$info.recs$hbyte;
+    call shr3byte(.temp);                 /* disk space if 1k blksiz */
+    call add3byte3(.total$1k$blocks,.temp);
+    if (file$info.recs$lword and 07h) <> 0 then
+         call add3byte(.total$1k$blocks,1);    /* round up */
+    
+end add$totals;
+
+mult23: procedure(index) address external;
+    dcl index address;
+end mult23;
+
+                /* fcb and dma buffer constants */
+declare
+    f$drvusr          lit '0',        /* drive and user field          */
+    f$name            lit '1',        /* file name                     */
+    f$rw              lit '9',        /* high bit is R/W attribute     */
+    f$dirsys          lit '10',       /* high bit is dir/sys attribute */
+    f$arc             lit '11',       /* high bit is archive attribute */
+    f$ex              lit '12';
+
+declare                                 /* XFCB                        */
+    xfcb$type          lit '10',        /* identifier on disk          */
+    xf$passmode        lit '12',        /* pass word protection mode   */
+    xf$pass            lit '16',        /* XFCB password               */
+    passlen            lit '8',         /* password length             */
+    xf$create          lit '25',        /* creation/access time stamp  */
+    xf$update          lit '29';        /* update time stamp           */
+
+declare                                 /* password mode of xfcb       */
+    pm$read            lit '80h',
+    pm$write           lit '40h',
+    pm$delete          lit '20h';
+
+dcl files$per$line byte;
+dcl cur$line address;
+
+dcl hdr (*) byte data      ('    Name     Bytes   Recs   Attributes $');
+dcl hdr$bars (*) byte data ('------------ ------ ------ ------------$');
+dcl hdr$pu (*) byte data        ('  Prot      Update    $');
+dcl hdr$xfcb$bars (*) byte data (' ------ --------------  --------------$');
+dcl hdr$access (*) byte data                          ('      Access    $');
+dcl hdr$create (*) byte data                          ('      Create    $');
+                                   /* example date        04/02/55 00:34  */
+
+display$file$info: procedure;
+                                                    /* print filename.typ   */
+    call printfn(.file$info.name(0));
+    call printb;
+    call pdecimal(file$info.kbytes,10000,true);
+    calì printchar('k')»                           /ª uð tï 3² Meç - Byteó  */
+                                                   /* or 32,000k            */
+    call printb;
+    call p3byte(.file$info.recs$lword,1);          /* records               */
+    call printb;
+    if rol(file$info.name(f$dirsys-1),1) then      /* Type                  */
+       call print(.('Sys$'));
+    else call print(.('Dir$'));
+    call printb;
+    if rol(file$info.name(f$rw-1),1) then
+        call print(.('RO$'));
+    else call print(.('RW$'));
+    call printb;
+    if  rol(file$info.name(f$arc-1),1) then        /* arc bit was on in all */
+        call print$char('A');                      /* dir entries           */
+    else call printb;
+    if rol(file$info.name(0),1) then
+        call print$char('1');
+    else call printb;
+    if rol(file$info.name(1),1) then
+        call print$char('2');
+    else call printb;
+    if rol(file$info.name(2),1) then
+        call print$char('3');
+    else call printb;
+    if rol(file$info.name(3),1) then
+        call print$char('4');
+    else call printb;
+end display$file$info;
+
+display$xfcb$info: procedure;
+        if file$info.x$i$adr <> 0 then
+        do;
+            call printb;
+            x$i$adr = file$info.x$i$adr;
+            if (xfcb$info.passmode and pm$read) <> 0 then
+                call print(.('Read  $'));
+            else if (xfcb$info.passmode and pm$write) <> 0 then
+                call print(.('Write $'));
+            else if (xfcb$info.passmode and pm$delete) <> 0 then
+                call print(.('Delete$'));
+            else
+                call print(.('None  $'));
+            call printb;
+            if (xfcb$info.update(0) <> 0 or xfcb$info.update(1) <> 0) then
+                call display$timestamp(.xfcb$info.update);
+            else call print(.('              $'));
+                call printb; call printb;
+            if (xfcb$info.create(0) <> 0 or xfcb$info.create(1) <> 0) then
+                 call display$timestamp(.xfcb$info.create(0));
+                                                /* Create/Access */
+        end;
+end display$xfcb$info;
+
+dcl first$title boolean initial (true);
+
+display$title: procedure;
+
+    if formfeeds then
+        call print$char(ff);
+    else if not first$title then
+        call crlf;
+    call print(.('Directory For Drive $'));
+    call printchar('A'+ cur$drv); call printchar(':');
+    if bdos >= bdos20 then 
+    do;
+        call print(.('  User $'));
+        call pdecimal(cur$usr,10,true);
+    end;
+    call crlf;
+    cur$line = 2;
+    first$title = false;
+end display$title;
+
+short$display: procedure (fname$adr);
+    dcl fname$adr address;
+    if cur$file mod files$per$line = 0 then
+        do;
+            if cur$line mod page$len = 0 then
+            do; call crlf;
+                call display$title;
+                call crlf;
+            end;
+            else
+                call crlf;
+            cur$line = cur$line + 1;
+            call printchar(cur$drv + 'A');
+        end;
+    else call printb;
+    call print(.(': $'));
+    call printfn(fname$adr);
+    call break;
+    cur$file = cur$file + 1;
+end short$display;
+
+test$att: procedure(char,off,on) boolean;
+    dcl (char,off,on) byte;
+    if (80h and char) <> 80h and (off and search$ops) <> 0 then
+        return(true);
+    if (80h and char) = 80h and (on and search$ops) <> 0 then
+        return(true);
+    return(false);
+end test$att;
+
+right$attributes: procedure(name$adr) boolean;
+    dcl name$adr address,
+        name based name$adr (1) byte;
+    return 
+        test$att(name(f$rw-1),s$rw,s$ro) and
+        test$att(name(f$dirsys-1),s$dir,s$sys);
+end right$attributes;
+
+short$dir: procedure;
+    dcl dcnt byte;
+    fcb(f$drvusr) = '?';
+    files$per$line = 4;
+    dcnt = search$first(.fcb);
+    call set$drive;
+    do while dcnt <> 0ffh;
+        buf$fcb$adr = shl(dcnt and 11b,5)+.buff;  /* dcnt mod 4 * 32        */
+        if (buf$fcb(f$drvusr) and 0f0h) = 0 and buf$fcb(f$ex)<= dpb.extmsk
+            then                            /* no dir labels, xfcbs */
+            if match then
+                if right$attributes(.buf$fcb(f$name)) then
+                    call short$display(.buf$fcb(f$name));
+        dcnt = search$next;
+    end;
+end short$dir;
+
+dcl index address;
+
+getnxt$file$info: procedure;
+dcl right$usr boolean;
+    right$usr = false;
+    if sorted then
+        do while not right$usr;
+           if index < filesfound then 
+           do; f$i$adr = mult23(f$i$indices(index));
+               index = index + 1;
+               right$usr = file$info.usr = cur$usr;
+           end;
+           else
+           do; f$i$adr = end$adr;      /* no more file$info recs */
+               right$usr = true;
+           end;
+        end;
+    else
+        do while not right$usr and f$i$adr <> end$adr;
+            f$i$adr = f$i$adr - size(file$info);
+            right$usr = file$info.usr = cur$usr;
+        end;
+end getnxt$file$info;
+
+size$display: procedure;
+    if (format and form$size) <> 0 then
+        files$per$line = 3;
+    else files$per$line = 4;
+    do while f$i$adr <> end$adr;
+    if ((file$info.x$i$adr <> 0 and (search$ops and s$xfcb)   <> 0) or
+        (file$info.x$i$adr  = 0 and (search$ops and s$nonxfcb) <> 0)) and
+        right$attributes(.file$info.name(0)) then 
+        do;
+            calì add$totals;
+            call short$display(.file$info.name(0));
+            call pdecimal(file$info.kbytes,10000,true);
+            call print(.('k$'));
+        end;
+        call getnxt$file$info;
+    end;
+end size$display;
+
+display$no$dirlabel: procedure;
+    files$per$line = 2;
+    do while f$i$adr <> end$adr;
+     if right$attributes(.file$info.name(0)) then
+     do;
+      if cur$file mod files$per$line = 0 then  /* need new line */
+      do;
+        if cur$line mod page$len = 0 then
+        do; call crlf;
+            call display$title;
+            call crlf;
+            call print(.hdr);
+            if (not sorted and f$i$adr <> end$adr + size(file$info)) or
+               (sorted and index < filesfound) then
+            do; call printb;                     /* then two sets of hdrs  */
+                call print(.hdr);                /* more than 1 file left  */
+            end;
+            call crlf;
+            call print(.hdr$bars);
+            if (not sorted and f$i$adr <> end$adr + size(file$info)) or
+               (sorted and index < filesfound) then
+            do; call printb;
+                call print(.hdr$bars);
+            end;
+            call crlf;
+            cur$line = cur$line + 3;
+        end;
+        else
+        do; call crlf;
+            cur$line = cur$line + 1;
+        end; 
+      end;
+      else
+        call printb;                           /* separate the files        */
+
+      call display$file$info;
+      cur$file = cur$file + 1;
+      call add$totals;
+      call break;
+     end; 
+     call getnxt$file$info;
+    end;
+end display$no$dirlabel;
+
+display$with$dirlabel: procedure;
+    files$per$line = 1;
+    do while f$i$adr <> end$adr;
+      if ((file$info.x$i$adr <> 0 and (search$ops and s$xfcb) <> 0) or
+         (file$info.x$i$adr  = 0 and (search$ops and s$nonxfcb) <> 0)) and
+         right$attributes(.file$info.name(0)) then 
+      do;
+        cur$file = cur$file + 1;
+        if cur$line mod page$len = 0 then
+        do; call crlf;
+            call display$title; 
+            call crlf;
+            call print(.hdr);
+            call print(.hdr$pu);
+            if (dirlabel and dl$access) <> 0 then
+                call print(.hdr$access);
+            else
+                call print(.hdr$create);
+            call crlf;
+            call print(.hdr$bars);
+            call print(.hdr$xfcb$bars);
+            cur$line = cur$line + 2;
+        end;
+        call crlf;
+        call display$file$info;        /* display non bdos 3.0 file info    */
+        call display$xfcb$info;
+        call break;
+        cur$line = cur$line + 1;
+        call add$totals;
+      end;
+      call getnxt$file$info;
+    end;
+end display$with$dirlabel;
+
+show$files: procedure public;    /* MODULE ENTRY POINT         */
+                                 /* display the collected data */
+    cur$line, cur$file = 0;      /* force titles and new line  */
+    totalkbytes.lword, totalkbytes.hbyte, totalrecs.lword, totalrecs.hbyte =0;
+    total$1k$blocks.lword, total$1k$blocks.hbyte = 0;
+    f$i$adr = last$f$i$adr + size(file$info);  /* initial if no sort */
+    index = 0;                                 /* initial if sorted  */
+    call getnxt$file$info;       /* base file info record      */
+
+    if format > 2 then
+    do;
+        call print(.('Illegal Format Value$'));
+        call terminate;
+    end;
+    do case format;              /* format = */   
+        call short$dir;                       /* form$short          */
+        call size$display;                    /* form$size           */
+                                              /* form = full         */
+        if (dir$label and dl$exists) = 0 or ((search$ops and s$xfcb) = 0 and
+            (search$ops and s$nonxfcb) <> 0) then
+            call display$no$dirlabel;
+        else
+        call display$with$dirlabel;
+    end;
+
+    if cur$file > 1 and format <> form$short then        /* print totals */
+    do;
+        if (page$len <> 0) and (cur$line + 4 > page$len) and formfeeds then
+        do;
+            call printchar(cr);
+            call printchar(ff);                 /* need a new page ? */
+        end;
+        else
+        do;
+            call crlf;
+            call crlf;
+        end;
+        call print(.(      'Total Bytes     = $'));
+        call p3byte(.total$kbytes,1);         /* 6 digit max */
+        call printchar('k');
+        call print(.('  Total Records = $'));
+        call p3byte(.total$recs,10);      /* 7 digit max */
+        call print(.('  Files Found = $'));
+        call pdecimal(cur$file,1000,true);    /* 4 digit max */
+        call print(.(cr,lf,'Total 1k Blocks = $'));
+        call p3byte(.total$1k$blocks,1);           /* 6 digit max */
+        call print(.('   Used/Max Dir Entries For Drive $'));
+        call print$char('A' + cur$drv);
+        call print$char(':'); call printb;
+        call pdecimal(used$de,1000,true);
+        call print$char('/');
+        call pdecimal(dpb.dirmax + 1,1000,true);
+    end;
+
+    if cur$file = 0 then
+    do;
+        if message then
+        do; call crlf;
+            call display$title;
+            call print(.('File Not Found.',cr,lf,'$'));
+        end;
+        call break;
+    end;
+    else
+    do; file$displayed = true;
+        if not formfeeds then
+            call print(.(cr,lf,'$'));
+    end;
+
+end show$files;
+
+end dshow;
+
+                                   
+
+                         

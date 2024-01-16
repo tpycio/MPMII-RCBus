@@ -1,0 +1,612 @@
+$title ('Super Directory Command')
+
+/*
+  Copyright (C) 1981
+  Digital Research
+  P.O. Box 579
+  Pacific Grove, CA 93950
+
+  Revised:
+    14 Sept 81 by Danny Horovitz
+*/
+
+sdir:
+do;
+
+declare start label,
+    jump byte data (0c3h),
+    jadr address data (.start-3);
+
+ /* C P / M - M P / M ,   d i r e c t o r y  c o m m a n d  (SDIR) */
+
+        /* commonly used macros */
+
+declare dcl literally 'declare',
+        lit literally 'literally',
+        true literally '1',
+        false literally '0',
+        boolean literally 'byte',
+        cr literally '13',
+        lf literally '10',
+        tab lit '9';
+
+declare cright (*) byte data (cr,lf,
+            'SDIR V1.0 ',
+            'Copyright(c) 1981 ',
+            'Digital Research ',
+            'Box 579 ',
+            'Pacific Grove, CA ',
+            '93950',01AH);
+
+                /* definitions for assembly interface module        */
+declare
+    fcb (33) byte external,        /* default file control block    */
+    maxb address external,         /* top of memory                 */
+    buff(128)byte external;        /* default buffer                */
+
+mon1: procedure(f,a) external;
+    declare f byte, a address;
+    end mon1;
+
+mon2: procedure(f,a) byte external;
+    declare f byte, a address;
+    end mon2;
+
+mon3: procedure(f,a) address external;
+    declare f byte, a address;
+    end mon3;
+
+scan: procedure(pcb$adr) external;
+    declare pcb$adr address;
+end scan;
+
+scan$init: procedure(pcb$adr) external;
+    declare pcb$adr address;
+end scan$init;
+
+get$files: procedure external;
+end get$files;
+
+sort: procedure external;
+end sort;
+
+mult23: procedure (num) address external;
+dcl num address;
+end mult23;
+
+show$files: procedure external;
+end show$files;
+
+printb: procedure external;
+end printb;
+
+print$char: procedure(c) external;
+dcl c byte;
+end print$char;
+
+print: procedure(string$adr) external;
+dcl string$adr address;
+end print;
+
+crlf: procedure external;
+end crlf;
+
+p$decimal: procedure(value,fieldsize,zsup) external;
+    dcl value address,
+        fieldsize address,
+        zsup boolean;
+end p$decimal;
+
+dcl debug boolean public initial (false);
+
+                 /* version information */
+
+dcl (os,bdos) byte public,
+    bdos20 lit '20H',
+    bdos30 lit '30H',
+    mpm    lit '10H';
+
+                /* fcb and dma buffer constants */
+declare
+    f$drvusr         lit '0',        /* drive/user byte                     */
+    f$name           lit '1',        /* file name                           */
+    fnamelen         lit '8',        /* file name length                    */
+    f$type           lit '9',        /* file type field                     */
+    ftypelen         lit '3',        /* type length                         */
+    f$rw             lit '9',        /* high bit is R/W attribute           */
+    f$dirsys         lit '10';       /* high bit is dir/sys attribute       */
+
+        /* search variables        */
+dcl search$ops address public initial(0),/* search options or'd in here     */
+    s$dir lit '1',
+    s$sys lit '2',
+    s$ro  lit '4',
+    s$rw  lit '8',
+    s$pass lit '16',
+    s$xfcb lit '32',
+    s$nonxfcb  lit '64',
+    s$exclude lit '128';
+
+dcl max$search$files lit '10',  /* files to search for on each pass through */
+    num$s$files byte public initial(0),    /* the directory */
+    search (max$search$files) structure(
+        name(8) byte,
+        type (3) byte,
+        drv byte,
+        anyfile byte ) public;  /* if explicit drive byte has been given    */
+                                /* with the file spec : "A:JUNK.JNK"        */
+
+dcl file$info structure (
+    space(23) byte);
+
+dcl get$all$dir$entries boolean public;
+dcl end$adr address external;
+dcl hash$table$len lit '128';
+dcl hash$table(hash$table$len) address external;
+
+dcl first$pass boolean public;
+dcl usr$vector address public initial(0),   /* bits for user #s to scan */
+    active$usr$vector address public,       /* active users on curdrv   */
+    drv$vector address initial (0);         /* bits for drives to scan  */
+
+dcl form$short lit '0',
+    form$size lit '1',
+    form$full lit '2',
+    format byte public initial (form$full),
+    page$len address public initial (0), /* lines on a page before printing */
+                                      /* new headers, 0 forces initial hdrs */
+    message boolean public initial(false),/* show titles when no files found*/
+    formfeeds boolean public initial(false);/* use form feeds               */
+
+dcl file$displayed boolean external;
+                                /* 1 or more files displayed by dsh.plm     */
+
+dcl sort$op boolean initial (true);             /* default is to do sorting */
+dcl sorted boolean external;                    /* if successful sort       */
+
+        /* other globals        */
+
+dcl cur$usr byte public,        /* current user being searched              */
+    cur$drv byte public;        /* current drive   "     "                  */
+
+        /* BDOS calls           */
+
+get$version: procedure address; /* returns current cp/m - mp/m version #    */
+    return mon2(12,0);
+end get$version;
+
+select$drive: procedure(d);
+    declare d byte;
+    call mon1(14,d);
+end select$drive;
+
+search$first: procedure(d) byte external;
+dcl d address;
+end search$first;
+
+search$next: procedure byte external;
+end search$next;
+
+get$cur$drv: procedure byte;        /* return current drive number          */
+    return mon2(25,0);
+end get$cur$drv;
+
+getlogin: procedure address;        /* get the login vector                 */
+    return mon3(24,0);
+end getlogin;
+
+getusr: procedure byte;             /* return current user number           */
+    return mon2(32,0ffh);
+end getusr;
+
+terminate: procedure public;
+    if os = mpm then
+        call mon1(0,143);               /* MP/M */
+    else
+        calì mon± (0,0)»                /* CP/M */
+end terminate;
+
+        /* Utility routines */
+
+number: procedure (char) boolean;
+    dcl char byte;
+    return(char >= '0' and char <= '9');
+end number;
+
+make$numeric: procedure(char$adr,len,val$adr) boolean;
+    dcl (char$adr, val$adr, place) address,
+        chars based char$adr (1) byte,
+        value based val$adr address,
+        (i,len) byte;
+
+    value = 0;
+    place = 1;
+    do i = 1 to len;
+        if not number(chars(len - i)) then
+            return(false);
+        value = value + (chars(len - i) - '0') * place;
+        place = place * 10;
+   end;
+   return(true); 
+end make$numeric;
+
+set$vec: procedure(v$adr,num) public;
+    dcl v$adr address,               /* set bit number given by num */
+        vector based v$adr address,  /* 0 <= num <= 15              */
+        num byte;
+    if num = 0 then
+       vector = vector or 1;
+    else
+       vector = vector or shl(double(1),num);
+end set$vec;
+
+bit$loc: procedure(vector) byte;
+                             /* return location of right most on bit vector */
+    dcl vector address,      /* 0 - 15                                      */
+        i byte;
+    i = 0;
+    do while i < 16 and (vector and double(1)) = 0;
+        vector = shr(vector,1);
+        i = i + 1;
+    end;
+    return(i);
+end bit$loc;
+
+get$nxt: procedure(vector$adr) byte;
+    dcl i byte,
+        (vector$adr,mask) address,
+        vector based vector$adr address;
+    if debug then
+        do;  call print(.(cr,lf,'getnxt: vector = $'));
+        call pdecimal(vector,10000,false);
+        end;   
+
+    if (i := bit$loc(vector)) > 15 then
+        return(0ffh);
+    mask = 1;
+    if i > 0 then
+        mask = shl(mask,i);
+    vector = vector xor mask;                /* turn off bit        */
+    if debug then
+        do;  call print(.(cr,lf,'getnxt: vector, i, mask $'));
+        call pdecimal(vector,10000,false);
+        call printb;
+        call pdecimal(i,10000,false); 
+        call printb;
+        call pdecimal(mask,10000,false);
+        end;
+    return(i);
+end get$nxt;               /* too bad plm rotates only work on byte values */
+
+dcl t$null lit '0',
+    t$param  lit '1',
+    t$op lit '2',
+    t$mod lit '4',
+    t$identifier lit '8',
+    t$string lit '16',
+    t$numeric lit '32',
+    t$filespec lit '64',
+    t$error lit '128';
+
+dcl pcb structure (
+            state address,
+            scan$adr address,
+            token$adr address,
+            tok$typ byte,
+            token$len byte,
+            p$level byte,
+            nxt$token byte) initial (0,.buff(0),.fcb(0),0,0,0,0) ;
+
+help: procedure;             /* show options for this program */
+
+call print(.(cr,lf,
+tab,tab,tab,'SDIR EXAMPLES',cr,lf,lf,
+'sdir file.one',tab,tab,tab,
+'(find a file on current user and default drive)',cr,lf,
+'sdir *.com d:*.pli',tab,tab,'(find matching files on default and d: drive)',
+cr,lf,
+'sdir [rw]',tab,tab,tab,'(find files that are read/write)',cr,lf,
+'sdir [ro dir sys]',tab,tab,'(same for read/only, directory, system)',cr,lf,
+'sdir [xfcb]',tab,tab,tab,'(find files with XFCB''s)',cr,lf,
+'sdir [nonxfcb]',tab,tab,tab,'(find files without XFCB''s)',cr,lf,
+'sdir [exclude] *.com',tab,tab,'(find files that don''t end in ''com'')',cr,lf,
+'sdir [nosort]',tab,tab,tab,'(don''t sort the files)',cr,lf,
+'sdir [full]',tab,tab,tab,'(show all file information)',cr,lf,
+'sdir [size]',tab,tab,tab,'(show name and size in kilobytes)',cr,lf,
+'sdiò [short]',tab¬tab,tab,'(sho÷ jusô thå filå names)',cr,lf,
+'sdir [drive = all]',tab,tab,'(search all logged in drives)',cr,lf,
+'sdir [drive = (a,b,p)]',tab,tab,
+'(search specified drives, ''disk'' is synonym)',cr,lf,
+'sdir [user = all]',tab,tab,'(find files with any user number)',cr,lf,
+'sdir [user = (0,1,15)]',tab,tab,'(find files with specified user number)',
+cr,lf,
+'sdir [length = n]',tab,tab,'(print headers every n lines)',cr,lf,
+'sdir [ff]',tab,tab,tab,'(print form feeds between headers)',cr,lf,
+'sdir [message user=all]',tab,tab,'(show user/drive areas with no files)',
+cr,lf,
+'sdir [help]',tab,tab,tab,'(show this message)',cr,lf,
+'sdir [dir sys rw ro sort xfcb nonxfcb full] d:*.*',tab,'(defaults)$'));
+
+call terminate;
+end help;
+
+dcl token based pcb.token$adr (12) byte;
+
+dcl got$options boolean;
+
+get$options: procedure;
+    dcl temp byte;
+
+    do while pcb.scan$adr <> 0ffffh and ((pcb.tok$typ and t$op) <> 0);
+      if pcb.nxt$token <> t$mod then
+      do;  /* options with no modifiers */
+        if token(1) = 'D' and token(2) = 'I' then
+            search$ops = search$ops or s$dir;
+        /* else if token(1) = 'D' and token(2) = 'E' then
+            debug = true; */
+        else if token(1) = 'E' then
+            search$ops = search$ops or s$exclude;
+        else if token(1) = 'F'then
+            if token(2) = 'F' then
+                formfeeds = true;
+            else if token(2) = 'U' then
+                format = form$full;
+            else goto op$err;  
+        else if token(1) = 'H' then
+            call help;
+        else if token(1) = 'M' then
+            message = true;
+        else if token(1) = 'N' then
+            if token(4) = 'X' then
+                search$ops = search$ops or s$nonxfcb;
+            else if token(3) = 'S' then
+                sort$op = false;
+            else goto op$err;
+        else if token(1) = 'P' then
+            search$ops = search$ops or s$pass;
+        else if token(1) = 'S' then
+            if token(2) = 'Y' then
+                search$ops = search$ops or s$sys;
+            else if token(2) = 'H' then
+                format = form$short;
+            else if token(2) = 'I' then
+                format = form$size;
+            else if token(2) = 'O' then
+                sort$op = true;
+            else goto op$err;
+        else if token(1) = 'R' and token(2) = 'O' then
+            search$ops = search$ops or s$ro;
+        else if token(1) = 'R' and token(2) = 'W' then
+            search$ops = search$ops or s$rw;
+        else if token(1) = 'X' then
+            search$ops = search$ops or s$xfcb;
+        else goto op$err; 
+        call scan(.pcb);
+      end;
+      else
+      do; /* options with modifiers */
+        if token(1) = 'L' then
+        do;
+            call scan(.pcb);
+            if (pcb.tok$typ and t$numeric) <> 0 then
+                if make$numeric(.token(1),pcb.token$len,.page$len) then
+                     if page$len < 5 then
+                         goto op$err;
+                     else call scan(.pcb);
+                else goto op$err;
+            else goto op$err;
+        end;
+        else if token(1) = 'U' then
+        do;
+          if debug then
+              call print(.(cr,lf,'In User option$'));
+          call scan(.pcb); 
+          if ((pcb.tok$typ and t$mod) = 0) or bdos < bdos20 then
+              goto op$err;
+          do while (pcb.tok$typ and t$mod) <> 0 and
+            pcb.scan$adr <> 0ffffh;
+            if token(1) = 'A' and token(2) = 'L' then
+                usr$vector = 0ffffh;
+            else if (pcb.tok$typ and t$numeric) <> 0
+                and pcb.token$len < 3 then
+                do;
+                if pcb.token$len = 1 then
+                    temp = token(1) - '0';
+                else
+                    temp = (token(1) - '0') * 10 + (token(2) - '0');
+                if temp >= 0 and temp <= 15 then
+                    call set$vec(.usr$vector,temp);
+                else goto op$err;
+                end;
+            else goto op$err;
+            call scan(.pcb);
+          end;
+        end;
+        else if token(1) = 'D' and (token(2) = 'R' or token(2) = 'I') then
+        do;                         /* allow DRIVE or DISK */
+          call scan(.pcb); 
+          if (pcb.tok$typ and t$mod) = 0  then
+              goto op$err;
+          do while (pcb.tok$typ and t$mod ) <> 0 and
+            pcb.scan$adr <> 0ffffh;
+            if token(1) = 'A' and token(2) = 'L' then
+            do;
+                drv$vector = 0ffffh;
+                drv$vector = drv$vector and get$login;
+            end;
+            else if token(1) >= 'A' and token(1) <= 'P' then
+                call set$vec(.drv$vector,token(1) - 'A');
+            else goto op$err;
+            call scan(.pcb);
+          end;
+        end; /* drive option */
+      else goto op$err;
+      end; /* options with modifiers */
+    end; /* do while */
+
+    got$options = true;
+    return;
+
+    op$err:
+        call print(.('Illegal Option or Modifier$'));
+        call terminate;
+end get$options;
+
+get$file$spec: procedure;
+    dcl i byte;
+    if num$s$files < max$search$files then
+    do;
+        call move(f$namelen + f$typelen,.token(1),
+           .search(num$s$files).name(0));
+        
+        if search(num$s$files).name(f$name - 1) = ' ' and
+           search(num$s$files).name(f$type - 1) = ' ' then
+           search(num$s$files).anyfile = true;   /* match on any file */
+        else search(num$s$files).anyfile = false;
+
+        if token(0) = 0 then
+            search(num$s$files).drv = 0ffh;       /* no drive letter with   */
+        else                                      /* file spec              */
+            search(num$s$files).drv = token(0) - 1;
+        /* 0ffh in drv field indicates to look on all drives that will be   */
+        /* scanned as set by the "drive =" option, see "match:" proc in     */
+        /* dsearch module         */
+
+        num$s$files = num$s$files + 1;
+    end;                              
+    else
+    do; call print(.('File Spec Limit is $'));
+        call p$decimal(max$search$files,100,true);
+        call crlf;
+    end;
+    call scan(.pcb);                  
+end get$file$spec;
+
+set$defaults: procedure;             
+           /* set defaults if not explicity set by user */ 
+    if ((search$ops and s$dir) = 0 and (search$ops and s$sys) = 0) then
+        search$ops = search$ops or s$dir or s$sys;
+    if ((search$ops and s$ro) = 0 and (search$ops and s$rw) = 0) then
+        search$ops = search$ops or s$rw or s$ro;
+
+    if ((search$ops and s$xfcb) <> 0 or (search$ops and s$nonxfcb) <> 0) then
+       do; if format = form$short then
+            format = form$full;
+       end;
+    else            /* both xfcb and nonxfcb are off */
+       search$ops = search$ops or s$nonxfcb or s$xfcb;
+
+    if num$s$files = 0 then
+    do;
+        search(num$s$files).anyfile = true;
+        search(num$s$files).drv = 0ffh;
+        num$s$files = 1;
+    end;
+
+    if drv$vector = 0 then
+        do i = 0 to num$s$files - 1;
+            if search(i).drv = 0ffh then search(i).drv = cur$drv;
+            call set$vec(.drv$vector,search(i).drv);
+        end;
+    else                            /* a "[drive =" option was found */
+        do i = 0 to num$s$files - 1;
+            if search(i).drv <> 0ffh and search(i).drv <> cur$drv then
+            do; call print(.('Illegal Global/Local Drive Spec Mixing$'));
+                call terminate;
+            end;
+        end;
+    if usr$vector = 0 then
+       call set$vec(.usr$vector,get$usr); 
+end set$defaults;
+
+dcl (save$uvec,temp) address;
+dcl i byte;
+declare last$dseg$byte byte
+  initial (0);
+
+start:
+    os = high(get$version);
+    bdos = low(get$version); 
+
+    /* note - initialized declarations set defaults */
+    cur$drv = get$cur$drv;
+    call scan$init(.pcb);
+    call scan(.pcb);
+    got$options = false;
+    do while pcb.scan$adr <> 0ffffh;
+        if (pcb.tok$typ and t$op) <> 0 then
+            if got$options = false then
+                call get$options;
+            else
+            do;
+                call print (.('Only One Set of Options Allowed$'));
+                call terminate;
+            end;
+        else if (pcb.tok$typ and t$filespec) <> 0 then
+            call get$file$spec;
+        else
+        do;
+            call print(.('Illegal File Spec$'));
+            call terminate;
+        end;
+    end;
+
+    call set$defaults;
+    /*  call set$mem$buffer; allocate memory on 8086 if ever needed */
+    end$adr = .hash$table + size(hash$table) - size(file$info);
+    /* end$adr is a constant, set here and used by dshow to find the  */
+    /* end of the file$info records when not sorted                   */
+
+    /* main control loop */
+
+    do while (cur$drv := get$nxt(.drv$vector)) <> 0ffh;
+        call select$drive(cur$drv);
+        save$uvec ½ usr$vector;      /* user numbers to search on each drive*/
+        active$usr$vector = 0;           /* users active on cur$drv      */
+        cur$usr = get$nxt(.usr$vector);  /* get first user num and mask  */ 
+        get$all$dir$entries = false;     /* off it off                   */
+        if usr$vector <> 0 then          /* find high water mark if      */
+        do;                              /* more than one user requested */
+            fcb(f$drvusr) = '?';
+            i = search$first(.fcb);  /* get first directory entry      */
+            temp = 0;
+            do while i <> 255;
+                temp = temp + 1;
+                i = search$next;
+            end;                        /* is there enough space in the */
+                                        /* worst case ?                 */
+            if maxb > mult23(temp + 1) + shl(temp,1) then
+                get$all$dir$entries = true;  /* location of last possible   */
+        end;                                 /* file info record and add    */
+        first$pass = true;                   /* room for sort indices       */
+        active$usr$vector = 0ffffh;
+        do while cur$usr <> 0ffh;
+            if debug then
+                call print(.(cr,lf,'in user loop $'));
+            call set$vec(.temp,cur$usr);
+            if (temp and active$usr$vector) <> 0 then
+            do;
+                if format <> form$short and
+                    (first$pass or not get$all$dir$entries)  then
+                do;
+                    call getfiles;      /* collect files in memory and  */
+                    first$pass = false; /* build the active usr vector  */
+                    sorted = false;     /* sort module will set sorted  */
+                    if sort$op then     /* to true, if successful sort  */
+                        call sort;
+                end;
+                call show$files;
+            end;
+            cur$usr = get$nxt(.usr$vector);
+        end;
+        usr$vector = save$uvec;             /* restore user vector for nxt  */
+    end; /* do while drv$usr                   drive scan                   */
+
+
+    if  not file$displayed and not message then
+        call print(.('File Not Found.$'));
+error:
+    call terminate;
+
+end;
+

@@ -1,0 +1,29 @@
+$title('MP/M II V2.0 Scheduler Process - Resident Portion')
+sched:
+do;
+
+$include (copyrt.lit)
+/*
+  Revised:
+    14 Sept 81  by Thomas Rolander
+*/
+
+$include (proces.lit)
+$include (queue.lit)
+
+/*
+  Sched Process Data Segment
+*/
+  declare os address public
+    data (0);
+
+  declare sched$pd process$descriptor public
+    data (0,rtr$status,100,0,
+             'Sc',0e8h /* 'h'+80h */,'ed   ',0,0,0,0,0);
+
+  declare sched$lqcb
+    structure (lqueue,
+               buf (71) byte)
+    initial (0,'Sched   ',69,1);
+
+end sched;

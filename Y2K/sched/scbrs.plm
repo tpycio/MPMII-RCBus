@@ -1,0 +1,187 @@
+$title('MP/M II  V2.0  Scheduler Process - Banked Portion')
+sched:
+do;
+
+$include (copyrt.lit)
+/*
+  Revised:
+    14 Sept 81  by Thomas Rolander
+*/
+
+$include (proces.lit)
+$include (queue.lit)
+$include (xdos.lit)
+
+/*
+    Common Literals
+*/
+
+  declare true literally '0FFFFH';
+  declare false literally '0';
+  declare forever literally 'while true';
+  declare boolean literally 'byte';
+
+  declare restarts literally
+    '0C7C7H,0C7C7H,0C7C7H,0C7C7H,
+     0C7C7H,0C7C7H,0C7C7H,0C7C7H,
+     0C7C7H,0C7C7H,0C7C7H,0C7C7H,
+     0C7C7H,0C7C7H,0C7C7H,0C7C7H,
+     0C7C7H,0C7C7H,0C7C7H';
+
+  mon1:
+    procedure (func,info) external;
+      declare func byte;
+      declare info address;
+    end mon1;
+
+  mon2:
+    procedure (func,info) byte external;
+      declare func byte;
+      declare info address;
+    end mon2;
+
+  mon2a:
+    procedure (func,info) address external;
+      declare func byte;
+      declare info address;
+    end mon2a;
+
+  declare xdos literally 'mon2';
+  declare xdosa literally 'mon2a';
+
+/*
+  Sched Process Data Segment
+*/
+  declare os address public
+    data (0);
+
+  declare sched$stack$pointer address
+    data (.sched$stk+38);
+
+  declare nrs$name (8) byte data (
+    'Sched   ');
+
+  declare sched$pd$adr address;
+  declare sched$pd based sched$pd$adr process$descriptor;
+
+  declare sched$stk (20) address
+    initial (restarts,.sched);
+
+  declare sched$lqcb$adr address;
+  declare sched$lqcb based sched$lqcb$adr structure (
+    lqueue,
+    buf (71) byte);
+
+  declare sched$uqcb userqcbhead
+    initial (0,.new$entry);
+
+  declare cli$uqcb userqcb
+    initial (0,0,'CliQ    ');
+
+  declare ret address;
+
+  declare (char,index,tindx) byte;
+
+  declare scheduling boolean;
+
+  declare temp address;
+
+  declare tod structure (
+    date address,
+    hrs byte,
+    min byte,
+    sec byte );
+
+  declare sched$item literally 'structure (
+    date address,
+    hrs byte,
+    min byte,
+    cli$command (65) byte )';
+
+  declare new$entry sched$item;
+
+  declare sched$table (4) sched$item;
+
+  declare assign$cli$pb (10) byte initial (
+    0,'cli     ',0);
+
+  room$in$table:
+    procedure boolean;
+
+      do tindx = 0 to 3;
+        if sched$table(tindx).date = 0
+          then return true;
+      end;
+      return false;
+    end room$in$table;
+
+  fill$entry:
+    procedure;
+
+      if room$in$table then
+      do;
+        call move (69,.new$entry,.sched$table(tindx));
+        scheduling = true;
+      end;
+    end fill$entry;
+
+
+  declare last$dseg$byte byte
+    initial (0);
+
+/*
+  sched:
+*/
+
+  sched:
+    procedure;
+  
+      sched$pd$adr = os + 2;
+      sched$lqcb$adr = sched$pd$adr + 52;
+      sched$uqcb.pointer = .sched$lqcb;
+
+      ret = xdos (make$queue,.sched$lqcb);
+      ret = xdos (open$queue,.cli$uqcb);
+      do tindx = 0 to 3;
+        sched$table(tindx).date = 0;
+      end;
+  
+      do forever;
+        ret = xdos (read$queue,.sched$uqcb);
+        scheduling = false;
+        call fill$entry;
+        do while scheduling;
+          ret = xdos (get$tod,.tod);
+          scheduling = false;
+          do tindx = 0 to 3;
+            if sched$table(tindx).date <> 0 then
+            do;
+              if (tod.date > sched$table(tindx).date) or
+                 ((tod.date = sched$table(tindx).date) and
+                  ((tod.hrs > sched$table(tindx).hrs) or
+                   ((tod.hrs = sched$table(tindx).hrs) and
+                     (tod.min >= sched$table(tindx).min)))) then
+              do;
+                cli$uqcb.msgadr = .sched$table(tindx).cli$command;
+                assign$cli$pb(0) = (sched$table(tindx).cli$command(1)
+                                   and 0fh);
+                ret = xdos (assign$console,.assign$cli$pb);
+                ret = xdos (write$queue,.cli$uqcb);
+                sched$table(tindx).date = 0;
+              end;
+              else
+              do;
+                scheduling = true;
+              end;
+            end;
+          end;
+          if scheduling then
+          do;
+            ret = xdos (flag$wait,3);
+          end;
+          if xdos (cond$read$queue,.sched$uqcb) = 0
+            then call fill$entry;
+        end;
+      end;
+    end sched;
+end sched;

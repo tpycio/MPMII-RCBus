@@ -1,0 +1,488 @@
+$title ('SDIR - Search')
+
+/*
+  Copyright (C) 1981
+  Digital Research
+  P.O. Box 579
+  Pacific Grove, CA 93950
+
+  Revised:
+    14 Sept 81 by Danny Horovitz
+*/
+
+dsearch:
+do;
+                /* search module for extended dir */
+
+                /* commonly used macros */
+
+declare dcl literally 'declare',
+        lit literally 'literally',
+        word lit 'address',
+        true literally '1',
+        false literally '0',
+        boolean literally 'byte',
+        cr literally '13',
+        lf literally '10';
+
+                /* definitions for assembly interface module        */
+declare
+    maxb  address external,        /* addr field of jmp BDOS        */
+    fcb (33) byte external,        /* default file control block    */
+    fcb16(16)byte external,
+    tbuff(128)byte external,
+    buff(128)byte external;        /* default buffer                */
+
+mon1: procedure(f,a) external;
+    declare f byte, a address;
+    end mon1;
+
+mon2: procedure(f,a) byte external;
+    declare f byte, a address;
+    end mon2;
+
+mon3: procedure(f,a) address external;
+    declare f byte, a address;
+    end mon3;
+
+dcl debug boolean external;
+
+                 /* version information */
+
+dcl (os,bdos) byte external,
+    bdos20 lit '20H',
+    bdos30 lit '30H',
+    mpm    lit '10H';
+
+dcl first$pass boolean external;
+dcl get$all$dir$entries boolean external;
+dcl usr$vector address external;
+dcl active$usr$vector address external;
+dcl used$de address public;                /* used directory entries        */
+dcl filesfound address public;             /* num files collected in memory */
+
+                /* fcb and dma buffer constants */
+declare
+    sectorlen         lit '128',      /* sector length                 */
+    f$drvusr          lit '0',        /* drive and user byte           */
+    f$name            lit '1',        /* file name                     */
+    fnamelen          lit '8',        /* file name length              */
+    f$type            lit '9',        /* file type field               */
+    f$typelen         lit '3',        /* type length                   */
+    f$rw              lit '9',        /* high bit is R/W attribute     */
+    f$dirsys          lit '10',       /* high bit is dir/sys attribute */
+    f$arc             lit '11',       /* high bit is archive attribute */
+    f$ex              lit '12',       /* extent                        */
+    f$s1              lit '13',       /* module byte                   */
+    f$rc              lit '15',       /* record count                  */
+    f$diskmap         lit '16',       /* file disk map                 */
+    diskmaplen        lit '16',       /* disk map length               */
+    f$drvusr2         lit '16',       /* fcb2                          */
+    f$name2           lit '17',
+    f$type2           lit '25',
+    f$rrec            lit '33',       /* random record                 */
+    f$rreco           lit '35';       /*   "      "    overflow        */
+
+declare
+    deleted$type lit '0E5H';
+
+declare                                 /* XFCB                        */
+    xfcb$type          lit '10h',       /* identifier on disk          */
+    xf$passmode        lit '12',        /* pass word protection mode   */
+    xf$pass            lit '16',        /* XFCB password               */
+    passlen            lit '8',         /* password length             */
+    xf$create          lit '24',        /* creation/access time stamp  */
+    xf$update          lit '28';        /* update time stamp           */
+
+declare                       /* directory label: special case of XFCB */
+    dirlabeltype       lit '20h',       /* identifier on disk          */
+    dl$password        lit '128',       /* masks on data byte          */
+    dl$access          lit '64',
+    dl$update          lit '32',
+    dl$makexfcb        lit '16',
+    dl$exists          lit '1';
+
+                                   /* search variables                     */
+dcl search$ops address external,   /* search options or'd in here          */
+    s$dir lit '1',
+    s$sys lit '2',
+    s$ro  lit '4',
+    s$rw  lit '8',
+    s$pass lit '16',
+    s$xfcb lit '32',
+    s$nonxfcb lit '64',
+    s$exclude lit '128';
+
+dcl format byte external,
+    form$short lit '0';
+
+dcl max$search$files lit '10',  /* files to search for on each pass through */
+    num$s$files byte external,  /* the directory */
+    search (max$search$files) structure(
+    name(8) byte,
+    type(3) byte,
+    drv byte,
+    anyfile boolean) external;
+
+        /* logical drive information                                        */
+
+/* function call 32 in 2.0 or later BDOS, returns the address of the disk
+parameter block for the currently selected disk, which consists of:
+        spt                   (2 bytes) number of sectors per track
+        blkshf                (1 byte) log2 of blocksize (2**blkshf=blksize)
+        blkmsk                (1 byte) 2**blkshf-1
+        extmsk                (1 byte) logical/physical extents
+        blkmax                (2 bytes) max alloc number
+        dirmax                (2 bytes) size of directory-1
+        dirblk                (2 bytes) reservation bits for directory
+        chksiz                (2 bytes) size of checksum vector
+        offset                (2 bytes) offset for operating system
+*/
+
+dcl dpb$adr address public,          /* disk parameter block address        */
+    dpb based dpb$adr structure
+        (spt address, blkshf byte, blkmsk byte, extmsk byte, blkmax address,
+         dirmax address, dirblk address, chksiz address, offset address),
+    bytes$per$block address;                /* bytes per block         */
+
+        /* other globals        */
+
+dcl cur$usr byte external,
+    cur$drv byte external,        /* current drive   "     "           */
+    dir$label byte public;      /* directory label for BDOS 3.0      */
+        /* error flags                */
+
+        /* BDOS calls */
+
+read$char: procedure byte;
+    return mon2 (1,0);
+end read$char;
+
+print: procedure(string$adr) external;
+    dcl string$adr address;
+end print;
+
+print$char: procedure(char) external;
+    dcl char byte;
+end print$char;
+
+pdecimal:procedure(val,prec,zsup) external;
+    dcl (val, prec) address;
+    dcl zsup boolean;
+end pdecimal;
+
+printfn: procedure(fnameadr) external;
+    dcl fnameadr address;
+end printfn;
+
+check$console$status: procedure byte;
+    return mon2 (11,0);
+end check$console$status;
+
+search$first: procedure (fcb$address) byte public;
+    declare fcb$address address;
+    return mon2 (17,fcb$address);
+end search$first;
+
+search$next: procedure byte public;
+    return mon2 (18,0);
+end search$next;
+
+get$dpb: procedure address;        /* return base of dpb   */
+    return mon3(31,0);        
+end get$dpb;
+
+terminate: procedure external;
+end terminate;
+
+set$vec: procedure(vector,value) external;
+dcl vector address,
+    value byte;
+end set$vec;
+
+mult23: procedure (f$i$num) address external;
+dcl f$i$num address;
+end mult23;
+
+        /* Utility routines */
+
+crlf: procedure external;   /* print carriage return, linefeed */
+end crlf;
+
+set$drive: procedure public;           /* base of disk parm block for the  */
+    dpb$adr = get$dpb;                 /* currently selected drive         */
+    bytes$per$block = shl(double(1),dpb.blkshf) * sectorlen;
+end set$drive;
+
+break: procedure public;
+    dcl x byte;
+    if check$console$status then
+    do;
+        x = read$char;
+        call terminate;
+    end;
+end break;
+
+number: procedure (char) boolean;
+    dcl char byte;
+    return(char >= '0' and char <= '9');
+end number;
+
+add3byte: procedure(byte3adr,num) external;
+      dcl (byte3adr,num) address;
+end add3byte;
+
+        /* add three byte number to 3 byte accumulater */ 
+add3byte3: procedure(totalb,numb) external;
+      dcl (totalb,numb) address;
+end add3byte3;
+
+        /* divide 3 byte value by 8 */
+shr3byte: procedure(byte3adr) external;
+      dcl byte3adr address;
+end shr3byte;
+
+add$block: procedure(ak,ab);
+    declare (ak, ab) address;
+    /* add one block to the kilobyte accumulator       */
+    declare kaccum based ak address; /* kilobyte accum */
+    declare baccum based ab address; /* byte accum     */
+    baccum = baccum + bytes$per$block;
+    do while baccum >= 1024;
+        baccum = baccum - 1024;
+        kaccum = kaccum + 1;
+    end;
+end add$block;
+
+declare
+        buf$fcb$adr address public,     /* index into directory buffer */
+        buf$fcb based buf$fcb$adr (32) byte,
+                                        /* fcb template for dir        */
+
+        (f$i$adr, end$adr, last$f$i$adr) address public,
+                                   /* indices into file$info array    */
+        file$info based f$i$adr structure(
+            usr byte,             /* user number                      */
+            name (8) byte,
+            type (3) byte,
+            bytes address,        /* byte count (mod kilobyte)        */
+            kbytes address,       /* kilobyte count                   */
+            recs$lword address,   /* record count is 3 byte value     */
+            recs$hbyte byte,      /* low word, high byte              */
+            hash$link address,    /* link for collison                */
+            x$i$adr address),     /* index into time stamp array for  */
+                                  /* this file                        */
+
+        x$i$adr address public,
+        xfcb$info based x$i$adr structure (
+            create (4) byte,
+            update (4) byte,
+            passmode byte);
+
+compare: procedure(length, str1$adr, str2$adr) boolean;
+    dcl (length,i) byte,
+        (str1$adr, str2$adr) address,
+        str1 based str1$adr (1) byte,
+        str2 based str2$adr (1) byte;
+    do i = 0 to length - 1;
+        if ((str1(i) and 7fh) <> (str2(i) and 7fh)) and str2(i) <> '?' then
+            return(false);
+    end;
+    return(true);
+end compare;
+
+match: procedure boolean public;
+dcl i byte,
+    temp word;
+    if (i := (buf$fcb(f$drvusr) and 0fh)) <> cur$usr then
+        if not get$all$dir$entries then       /* Not looking for this user  */
+            return(false);                    /* and not buffering all other*/
+        else                                  /* specified user files on    */
+        do; temp = 0;                         /* this drive.                */
+            call set$vec(.temp,i);
+            if (temp and usr$vector) = 0 then /* Getting all dir entries,   */
+                return(false);                /* with user number corresp'g */
+        end;                                  /* to a bit on in usr$vector  */
+    if usr$vector <> 0 then
+        if i <> 0 and first$pass and usr$vector <> 0 then
+            call set$vec(.active$usr$vector,i);
+                                  /* build active usr vector for this drive */
+    do i = 0 to num$s$files - 1;
+        if search(i).drv = 0ffh or search(i).drv = cur$drv then
+                      /* match on any drive if 0ffh */
+            if search(i).anyfile = true then
+                 return((search$ops and s$exclude) = 0);
+            else if compare(11,.buf$fcb(f$name),.search(i).name(0)) then
+                 return((search$ops and s$exclude) = 0);
+    end;
+    return((search$ops and s$exclude) <> 0);
+end match;
+
+dcl hash$table$size lit '128',               /* must be power of 2         */
+    hash$tablå (hash$table$size© address public at (.memory),
+                                             /* must be initialized on each*/
+    hash$entry$adr address,                  /* disk scan                  */
+    hash$entry based hash$entry$adr address; /* where to put a new entry's */
+                                             /* address                    */
+
+hash$look$up: procedure boolean;
+    dcl (i,found,hash$index) byte;
+    hash$index = 0;
+    do i = f$name to f$namelen + f$typelen by 2;
+        hash$index = hash$index + (buf$fcb(i) and 7fh); /* attributes may   */
+    end;                                     /* only be set w/ 1st extent   */
+    hash$index = hash$index + cur$usr;
+    hash$index = hash$index and (hash$table$size - 1);
+    hash$entry$adr = .hash$table(hash$index);
+    f$i$adr = hash$table(hash$index);
+    
+    found = false;
+    do while f$i$adr <> 0 and not found;
+        if file$info.usr = (buf$fcb(f$drvusr) and 0fh) and
+            compare(f$namelen + f$typelen,.file$info.name(0),.buf$fcb(f$name))
+            then
+            found = true;
+        else
+            do; hash$entry$adr = .file$info.hash$link;   /* assuming no '?' */
+            f$i$adr = file$info.hash$link;               /* in file name     */
+            end;
+    end;
+    if f$i$adr = 0 then
+        return(false);
+    else return(true); 
+end hash$look$up;
+
+store$file$info: procedure boolean;
+        /* Look for file name of last found fcb or xfcb in fileinfo       */
+        /* array, if not found put name in fileinfo array.   Copy other   */
+        /* info to fileinfo or xfcbinfo.   The lookup is hash coded with  */
+        /* collisions handled by linking up file$info records through     */
+        /* the hash$link field of the previous file$info record.          */
+        /* The file$info array grows upward in memory and the xfcbinfo    */
+        /* grows downward.                                                */
+        /*
+                          
+                        -------------------------<---.memory
+       __               |      HASH TABLE       |
+hash = \ of filename -->| root of file$info list|------------>---|
+func   /__ letters      |          .            |                |
+                        |          .            |                |
+        lower memory    -------------------------                |
+                        |    file$info entry    |                |
+                -----<--|          .            | <--------------|
+    (collision) |       |          .            |
+                ------->|          .            |
+                        |          .            |-------------------->|
+                        | last file$info entry  | <- last$f$i$adr     |
+                        |-----------------------|                     |
+                        |                       |                     |
+                        |                       |                     |
+                        |   unused by dsearch,  |                     |
+                        |     used by dsort     |                     |
+                        |      for indices      |                     |
+                        |                       |                     |
+                        |                       |                     | 
+                        |-----------------------|                     |
+                        |    last$xfcb entry    | <- x$i$adr          |
+                        |           .           |                     |
+                        |           .           |                     |
+                        |           .           | <-------------------|
+                        |   first xfcb entry    |
+                        |-----------------------|
+                        |   un-usuable memory   | <- maxb
+  higher memory         -------------------------                        */
+
+
+    dcl (i, j) byte,
+        block$num address;
+
+    if not hash$look$up then           /* not in table already          */ 
+                           /* hash$entry is where to put adr of new entry */ 
+    do;                    /* copy to new position in file info array   */
+        if f$i$adr + 2 * size(file$info) > x$i$adr then
+            return(false);                     /* out of memory         */
+        f$i$adr = (last$f$i$adr := last$f$i$adr + size(file$info));
+        filesfound = filesfound + 1;
+        call move(f$namelen + f$typelen, .buf$fcb(f$name),.file$info.name);
+        file$info.usr = buf$fcb(f$drvusr) and 0fh;
+        file$info.bytes,file$info.kbytes,file$info.recs$lword,
+            file$info.recs$hbyte, file$info.x$i$adr,file$info.hash$link = 0;
+        hash$entry = f$i$adr;           /* save the address of file$info    */
+    end;                                /* zero totals for the new file     */
+
+    /* else hash$lookup has set f$i$adr to the file entry already in the    */
+    /* hash table                       */  
+
+                                        /* save xfcb or fcb type info       */
+    if (buf$fcb(f$drvusr) and xfcb$type) <> 0 then
+    do;                                        /* XFCB                      */
+        if last$f$i$adr + size(file$info) > x$i$adr - size(xfcb$info) then
+            return(false);                /* out of memory                  */
+        x$i$adr = x$i$adr - size(xfcb$info);
+        call move(8,.buf$fcb(xf$create),.xfcb$info.create);
+        xfcb$info.passmode = buf$fcb(xf$passmode);
+        file$info.x$i$adr = x$i$adr;
+    end;
+    else            /* regular fcb, file$info  is already positioned        */
+    do;                                  /* add to number of records        */
+        call add3byte(.file$info.recs$lword, buf$fcb(f$rc)
+            + shl(double(buf$fcb(f$ex) and dpb.extmsk) , 7));
+        file$info.name(f$arc-1) = file$info.name(f$arc-1) and buf$fcb(f$arc);
+                               /* 0 archive bit if it is 0 in any dir entry */
+                                          /* count kilobytes                */
+        i = 1;                            /* 1 or 2 byte block numbers ?    */
+        if dpb.blk$max > 255 then
+            i = 2;
+        do j = f$diskmap to f$diskmap + diskmaplen - 1 by i;
+            block$num = buf$fcb(j);
+            if i = 2 then                      /* word block numbers        */
+                block$num = block$num or buf$fcb(j+1);
+            if block$num <> 0 then             /* allocated                 */
+                call add$block(.file$info.kbytes,.file$info.bytes);
+        end;
+    end;
+    return(true);                             /* success                    */
+end store$file$info;
+
+get$files: procedure public;       /* with one scan through directory get   */
+    dcl dcnt byte;                 /* files from currently selected drive   */
+
+    last$f$i$adr = end$adr;
+    /* last$f$i$adr is the address of the highest file info record    */
+    /* in memory                                                      */
+
+    do dcnt = 0 to hash$table$size - 1;   /* init hash table                */
+        hash$table(dcnt) = 0;
+    end;
+
+    x$i$adr = maxb;               /* top of mem, put xfcb info here         */
+    call set$drive;
+    dir$label,filesfound, used$de = 0;
+    
+    fcb(f$drvusr) = '?';          /* match all dir entries                  */
+    dcnt = search$first(.fcb);
+    do while dcnt <> 255;
+        buf$fcb$adr = shl(dcnt and 11b,5)+.buff;  /* dcnt mod 4 * 32        */
+        if buf$fcb(f$drvusr) <> deleted$type then
+        do;
+          used$de = used$de + 1;
+          if buf$fcb(f$drvusr) = dirlabel$type then   /* dir label ?        */
+              dir$label = buf$fcb(f$ex);           /* save label info       */
+          else if match then
+          do;
+              if not store$file$info then         /* store fcb or xfcb info */
+              do;                                 /* out of space           */
+                  call print (.(cr,lf,lf,'Out of Memory',cr,lf,lf,'$'));
+                  return; 
+              end;
+          end;
+        end;
+        call break;
+        dcnt = search$next;                   /* to next entry in directory */
+    end; /* of do while dcnt <> 255 */
+
+end get$files;
+
+end dsearch;
+
+                                                           

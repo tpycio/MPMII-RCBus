@@ -1,0 +1,1634 @@
+$ TITLE('MP/M II --- SET 2.0')
+
+
+
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+
+
+                       * * *  SET  * * *
+
+
+ * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+
+
+set:
+do;
+$include (copyrt.lit)
+
+/*
+   Revised:
+     14 Sept 81 by Doug Huskey
+*/
+
+declare
+    mpmproduct literally '01h', /* requires mp/m */
+    cpmversion literally '30h'; /* requires 3.0 cp/m */
+
+
+declare
+    true        literally '1',
+    false       literally '0',
+    dcl         literally 'declare',
+    lit         literally 'literally',
+    proc        literally 'procedure',
+    addr        literally 'address',
+    forever     literally 'while true',
+    tab         literally '9',
+    cr          literally '13',
+    lf          literally '10',
+    ctrlc       literally '3h',
+    ctrlx       literally '18h',
+    ctrlh       literally '8h';
+
+
+declare start label;
+declare jump byte data(0c3h),
+    jadr address data (.start-3);
+    /* jump to status */
+
+declare copyright (*) byte data (
+  ' Copyright (c) 1981, Digital Research ');
+
+declare versiondate (*) byte data ('08/09/81');
+declare version     (*) byte data ('SET 2.0',0);
+
+
+/*
+            Digital Research
+            Box 579
+            Pacific Grove, Ca
+            93950
+*/
+$ eject
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+
+
+                   * * *  MESSAGES  * * *
+
+
+ * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+
+
+
+        declare
+            not$found  (*) byte data (' File not found',0),
+            no$space   (*) byte data (' or no directory space',0),
+            invalid    (*) byte data ('Invalid ',0),
+            set$prot   (*) byte data ('[protect=on]',0),
+            dirlabel   (*) byte data ('Directory Label ',0),
+            option$set (*) byte data (' attribute set ',0),
+            read$only  (*) byte data ('read only',0),
+            ro         (*) byte data (' (RO)',0),
+            read$write (*) byte data ('read write (RW)',0),
+            comma      (*) byte data (', ',0),
+            set$to     (*) byte data ('set to ',0),
+            error$msg  (*) byte data ('ERROR: ',0),
+            readmode   (*) byte data ('READ',0),
+            writemode  (*) byte data ('WRITE',0),
+            deletemode (*) byte data ('DELETE',0),
+            nopasswd   (*) byte data ('NONE',0),
+            time$stamp (*) byte data ('Time Stamps ON',0),
+            on         (*) byte data ('    on   ',0),
+            off        (*) byte data ('    off  ',0),
+            failed     (*) byte data ('Unsuccessful Function',0),
+            label$name (*) byte data ('Label');
+
+
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+
+
+                   * * *  CP/M INTERFACE * * *
+
+
+ * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+
+
+
+
+declare
+    maxb      address external,    /* addr field of jmp BDOS */
+    fcb (33)  byte external,       /* default file control block */
+    buff(128) byte external,       /* default buffer */
+    buffa     literally '.buff',   /* default buffer */
+    fcba      literally '.fcb',    /* default file control block */
+    sectorlen literally '128',     /* sector length */
+    user$code byte;                /* current user code */
+
+$include (proces.lit)
+
+    /* reset drive mask */
+    declare reset$mask (16) address data (
+      0000000000000001b,
+      0000000000000010b,
+      0000000000000100b,
+      0000000000001000b,
+      0000000000010000b,
+      0000000000100000b,
+      0000000001000000b,
+      0000000010000000b,
+      0000000100000000b,
+      0000001000000000b,
+      0000010000000000b,
+      0000100000000000b,
+      0001000000000000b,
+      0010000000000000b,
+      0100000000000000b,
+      1000000000000000b );
+
+
+boot: procedure external;
+    /* reboot */
+    end boot;
+
+mon1: procedure(f,a) external;
+    declare f byte, a address;
+    end mon1;
+
+mon2: procedure(f,a) byte external;
+    declare f byte, a address;
+    end mon2;
+
+declare mon3 literally 'mon2a';
+
+mon3: procedure(f,a) address external;
+    declare f byte, a address;
+    end mon3;
+
+    /********** SYSTEM FUNCTION CALLS *********************/
+
+printchar: procedure(char);
+    declare char byte;
+    call mon1(2,char);
+    end printchar;
+
+printb: procedure;
+    /* print blank character */
+    call printchar(' ');
+    end printb;
+
+printx: procedure(a);
+    declare a address;
+    declare s based a byte;
+        do while s <> 0;
+        call printchar(s);
+        a = a + 1;
+        end;
+    end printx;
+
+check$con$stat: procedure byte;
+    return mon2(11,0); /* console ready */
+    end check$con$stat;
+
+crlf: procedure;
+    call printchar(cr);
+    call printchar(lf);
+    if check$con$stat then
+        do; 
+        call mon1 (1,0);  /* read character */
+        call printx(.('Aborted',0));
+        call mon1 (0,0);  /* system reset */
+        end;
+    end crlf;
+
+print: procedure(a);
+    declare a address;
+    /* print the string starting at address a until the
+    next 0 is encountered */
+    call crlf;
+    call printx(a);
+    end print;
+
+get$version: procedure addr;
+    /* returns current cp/m version # */
+    return mon3(12,0);
+    end get$version;
+
+
+conin: procedure byte;
+    return mon2(6,0fdh);
+    end conin;
+
+select: procedure(d);
+    declare d byte;
+    call mon1(14,d);
+    end select;
+
+open: procedure(fcb) byte;
+    declare fcb address;
+    return mon2(15,fcb);
+    end open;
+
+search$first: procedure(fcb) byte;
+    declare fcb address;
+    return mon2(17,fcb);
+    end search$first;
+
+search$next: procedure byte;
+    return mon2(18,0);
+    end search$next;
+
+cselect: procedure byte;
+    /* return current disk number */
+    return mon2(25,0);
+    end cselect;
+
+setdma: procedure(dma);
+    declare dma address;
+    call mon1(26,dma);
+    end setdma;
+
+writeprot: procedure byte;
+    /* write protect the current disk */
+    return mon2(28,0);
+    end writeprot;
+
+getuser: procedure byte;
+    /* return current user number */
+    return mon2(32,0ffh);
+    end getuser;
+
+setuser: procedure(user);
+    declare user byte;
+    call mon1(32,user);
+    end setuser;
+
+getfilesize: procedure(fcb);
+    declare fcb address;
+    call mon1(35,fcb);
+    end getfilesize;
+
+  /* 0ff => return BDOS errors */
+return$errors:
+    procedure(mode);
+    declare mode byte;
+      call mon1 (45,mode);	
+    end return$errors;
+
+setind: procedure(fcb) address;
+    dcl fcb addr;
+    call setdma(.passwd);
+    /* set file indicators for current fcb */
+    return mon3(30,fcb);
+    end setind;
+
+    /********** DISK PARAMETER BLOCK **********************/
+
+declare
+    dpba address,               
+    dpb based dpba structure
+    (spt address, bls byte, bms byte, exm byte, mxa address,
+     dmx address, dbl address, cks address, ofs address),
+    scptrk literally 'dpb.spt',
+    blkshf literally 'dpb.bls',
+    blkmsk literally 'dpb.bms',
+    extmsk literally 'dpb.exm',
+    maxall literally 'dpb.mxa',
+    dirmax literally 'dpb.dmx',
+    dirblk literally 'dpb.dbl',
+    chksiz literally 'dpb.cks',
+    offset literally 'dpb.ofs';
+
+set$dpb: procedure;
+    /* set disk parameter block values */
+    dpba = mon3(31,0); /* base of dpb */
+    end set$dpb;
+
+    /******************************************************/
+
+wrlbl: procedure(fcb) address;
+    declare fcb address;
+    call setdma(.passwd);	/* set dma=password */
+    return mon3(100,fcb);
+    end wrlbl;
+
+getlbl: procedure(d) byte;
+    declare d byte;
+
+    return mon2(101,d);
+    end getlbl;
+  
+readxfcb: procedure(fcb);
+    declare fcb address;
+    call setdma(.passwd);	/* set dma=password */
+    call mon1(102,fcb);
+    end readxfcb;
+
+wrxfcb: procedure(fcb) address;
+    declare fcb address;
+
+    call setdma(.passwd);
+    return mon3(103,fcb);
+    end wrxfcb;
+
+declare
+    pdadr      addr,
+    pd         based pdadr process$descriptor;
+
+getpd: procedure;
+
+    pdadr = mon3(156,0);
+    end getpd;
+
+
+reset$drv: procedure(drv) byte;
+    dcl drv byte;
+
+    return mon2(37,reset$mask(drv));
+    end reset$drv;
+
+terminate: procedure;
+    call crlf;
+    call mon1 (0,0);
+    end terminate;
+$ eject
+
+
+
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+
+
+                 * * *  GLOBAL DATA  * * *
+
+
+ * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+
+
+        declare
+            fnam     literally '11',
+            fmod     literally '14',
+            frc      literally '15',
+            fln      literally '15',
+            fdm      literally '16',
+            fdl      literally '31',
+            ftyp     literally '9',
+            rofile   literally '9',     /* read/only file */
+            infile   literally '10',    /* invisible file */
+            archiv   literally '11',    /* archived  file */
+            attrb1   literally  '1',    /* attribute F1'  */
+            attrb2   literally  '2',    /* attribute F2'  */
+            attrb3   literally  '3',    /* attribute F3'  */
+            attrb4   literally  '4';    /* attribute F4'  */
+    
+
+        declare
+            fcbp     address,
+            fcbv     based fcbp (32) byte,
+            fext     literally 'fcbv(12)';
+
+        declare
+            xfcb     (32) byte,
+            xfcbmode byte at (.xfcb(12));  /* password mode */
+
+        declare                          /* command buffer */
+            cmd (27) byte initial(0,'HELP       ',0),
+            passwd (17) byte;           /* password buffer */
+
+        declare
+            scase   byte initial(-1),    /* file attributes */
+            fileref byte initial(false), /* file reference  */
+            lblcmd  byte initial(false), /* label attribute */
+            xfcbcmd byte initial(false), /* xfcb  attribute */
+            wild    byte initial(false), /* file = a wildcard */
+            optdel  byte initial(false), /* delimiter = option */
+            option$found  byte initial(false),/* options exist */
+            time$opt byte initial(false),/* option = [time] */
+            password byte initial(false), /* file has password */
+            option  byte initial(false); /* cmd = a option */
+
+        declare                         /* parsing */
+            more  byte initial(true),   /* more to parse */
+            opt$adr    addr,            /* start of options */
+            ibp        addr;            /* input buffer ptr */
+
+        declare            
+            (sav$dcnt, sav$searcha)     addr,
+            sav$searchl  byte,
+            dirbuf (128) byte;          /* used for searches */
+
+        declare
+            cdisk     byte,             /* current disk */
+            ver       addr;             /* version checking */
+
+        declare
+            error$code addr;            /* for bdos returned
+                                           errors */
+        declare
+            parse$fn structure (
+                buff$adr  addr,
+                fcb$adr   addr),
+            last$buff$adr addr;         /* used for parsing */
+
+        declare  /* file attribute bytes and values by scase */
+            attr$byte (14) byte   
+                /*     RW RO DIR SYS  A F F F F  A F F F F  */
+                initial(9, 9, 10, 10,11,1,2,3,4,11,1,2,3,4),
+            attr$value (14) byte  
+                /*     RW RO DIR SYS  A F F F F  A F F F F  */
+                initial(0, 1,  0,  1, 1,1,1,1,1, 0,0,0,0,0);
+
+        declare                /* strings for match routine */
+            attributes (*) byte data
+                ('RWRODISYARF1F2F3F4Attribute',0),
+            values     (*) byte data
+                ('OFONREWRDENOMode',0),
+            boolean    (*) byte data
+                ('OFONValue, Use ON or OFF',0);
+
+        /*       VALUES                 FILE ATTRIBUTES
+              mode   keyword          scase     attribute
+                 0   OFF                  0     RW
+                 1   ON                   1     RO
+                 2   READ                 2     DIR
+                 3   WRITE                3     SYS
+                 4   DELETE               4     ARCHIVE
+                 5   NONE                 5     F1
+                 BOOLEAN                  6     F2
+                 0   OFF                  7     F3
+                 1   ON                   8     F4          */
+$ eject
+
+
+
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+
+
+                 * * *  BASIC ROUTINES  * * *
+
+
+ * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+
+
+
+                 /* help message */
+help: procedure;
+    call print(.(tab,tab,tab,'SET EXAMPLES',0));
+    call print(.(cr,lf,'FOR FILES',cr,lf,cr,lf,
+                 'set *.asm [rw, dir] ',tab,tab,tab,'(File Attributes)',0));
+    call print(.(
+                 'set *.prl [ro, sys]',0));
+    call print(.(
+                 'set *.dat [archive=on,f1=off,f2=on,f3=on]',0));
+    call print(.(
+                 'set *.asm [time]    ',tab,tab,tab,'(Time Stamping on ASM files)',0));
+    call print(.(
+                 'set *.asm [password = xyz]',
+                 tab,tab,'(Password Protection)',0));
+    call print(.('set *.asm [protect  = read]',
+                 tab,tab,'(read, write, delete or none)',0));
+    call print(.(cr,lf,'FOR DRIVES',cr,lf,cr,lf,
+                 'set [password = xyz]',tab,tab,tab,'(Label Password)',0));
+    call print(.('set [protect  = on] ',tab,tab,tab,'(Password Protection)',0));
+    call print(.('set [update   = on] ',tab,tab,tab,'(Update Time Stamps - on or off)',0));
+    call print(.('set [create   = on] ',tab,tab,tab,'(Creation Time Stamps - on or off)',0));
+    call print(.('set [access   = on] ',tab,tab,tab,'(Access Time Stamps - on or off)',0));
+    call print(.('set [make     = on] ',tab,tab,tab,'(Make XFCBs - on or off)',0));
+    call print(.(
+                 'set [default  = xyz]',tab,tab,tab,'(Default Password)',0));
+    call print(.('set a:[rw],   b:[ro]',tab,tab,tab,'(Drive Status)',0));
+    end help;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* invalid command error */
+perror: proc(msg);
+    dcl msg addr;
+
+    call print(.error$msg);
+    if ibp = 0 then 
+        call printx(parse$fn.buff$adr);
+    else
+        call printx(last$buff$adr);
+    call printx(.(' ?',0));
+    call print(.invalid);
+    call printx(msg);
+    call terminate;
+    end perror;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* parsing error */
+parse$error: proc;
+
+    if option then 
+        call perror(.('Parameter',0));
+    else
+        call perror(.('File',0));
+    end parse$error;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+        /* parse the next lexical item in the command line 
+           parse$fn must filled in with input parameters */
+parse: procedure address;
+    declare p address;
+    declare c based p byte;
+
+    p = mon3(152,.parse$fn);
+    if p = 0FFFFh then 
+        call parse$error;
+    else if p <> 0 then do;
+        if c = '[' then
+            optdel = true;
+        else if c = ']' then 
+            optdel = false;
+        p = p + 1;
+        if c = ',' then
+            p = p + 1;
+        last$buff$adr = parse$fn.buff$adr - 1;
+        parse$fn.buff$adr = p;
+        end;
+    else
+        optdel = false;
+    return p;
+    end parse;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* parse a option value */
+parse$value: proc;
+
+    /* test for end */
+    if ibp = 0 then
+        call parse$error;
+
+    /* more to go */
+    ibp = parse;
+    end parse$value;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                  /* fill string @ s for c bytes with f */
+fill:   proc(s,f,c);
+    dcl s addr,
+        (f,c) byte,
+        a based s byte;
+
+        do while (c:=c-1)<>255;
+        a = f;
+        s = s+1;
+        end;
+    end fill;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                  /* copy c bytes from s to d */
+copy:   proc(s,d,c);
+    dcl (s,d) addr, c byte;
+    dcl a based s byte, b based d byte;
+
+        do while (c:=c-1)<>255;
+        b=a; s=s+1; d=d+1;
+        end;
+    end copy;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                  /* upper case character from console */
+ucase:   proc byte;
+    dcl c byte;
+
+    if (c:=conin) >= 'a' then
+       if c < '{' then
+          return(c-20h);
+    return c;
+    end ucase;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                  /* get password and place in passwd */
+getpasswd:   proc;
+    dcl (i,c) byte;
+
+    call print(.('Password ? ',0));
+retry:
+    call fill(.passwd,' ',8);
+        do i = 0 to 7;
+nxtchr:
+        if (c:=ucase) >= ' ' then 
+            passwd(i)=c;
+        if c = cr then
+            go to exit;
+        if c = ctrlx then
+            goto retry;
+        if c = ctrlh then do;
+            if i<1 then
+                goto retry;
+            else do;
+                passwd(i:=i-1)=' ';
+                goto nxtchr;
+                end;
+            end;
+        if c = ctrlc then
+            call terminate;       /* end of program */
+        end;
+exit:
+    c = check$con$stat;             /* clear raw I/O mode */
+    end getpasswd;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* print drive name */
+printdrv: procedure;
+
+        call printchar(cdisk+'A');
+        call printchar(':');
+        end printdrv;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* print file name */
+printfn: procedure;
+        declare k byte;
+
+        call printdrv;
+
+            do k = 1 to fnam;
+            if k = ftyp then 
+	       call printchar('.');
+            call printchar(fcbv(k) and 7fh);
+            end;
+        end printfn;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                  /* error message routine */
+bdos$error:   procedure;
+   declare
+      code byte;
+
+    if (code:=high(error$code)) < 3 then do;
+        call print(.error$msg);
+        call printdrv;
+        call printb;
+        if code = 1 then 
+            call printx(.('BDOS Bad Sector',0));
+        if code=2 then do;
+            call printx(.('Drive ',0));
+            call printx(.read$only);
+            end;
+        call terminate;
+        end;
+    call printx(.error$msg);
+    if code = 3 then
+        call printx(.read$only);
+    if code = 5 then      
+        call printx(.('Currently Opened',0));
+    if code = 7 then 
+        call printx(.('Wrong Password',0));
+    end bdos$error;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* get address of FCB in dirbuf */
+set$up$file: procedure(dir$index);
+    dcl dir$index byte;
+
+    if dir$index <> 0ffh then do;
+        sav$dcnt = pd.dcnt;
+        sav$searchl = pd.searchl;
+        sav$searcha = pd.searcha;
+        fcbp = shl(dir$index,5) + .dirbuf;
+        fcbv(0) = fcb(0);                 /* set drive byte */
+        end;
+    end set$up$file;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                  /*  match command from command string */
+match: proc(commands$adr, last$cmd) byte;
+    dcl (i,j,matched,scase,last$cmd) byte;
+    dcl 
+        commands$adr       address,
+        commands based commands$adr (1) byte;
+
+    j = 0;
+        do scase = 0 to last$cmd;
+        matched = true;
+            do i = 1 to 2;
+            if commands(j) <> cmd(i) then 
+                matched = false;
+            j = j + 1;
+            end;
+        if matched then 
+            return scase;
+        end;
+    call perror(.commands(j));
+    end match;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* return boolean option value */
+bool: procedure byte;
+
+        if match(.boolean,1) then
+            return true;
+        else 
+            return false;
+        end bool;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* print boolean option value */
+pbool: procedure(value);
+        declare
+           value byte;
+
+        call printx(.option$set);
+        if value then
+            call printx(.('ON',0));
+        else
+            call printx(.('OFF',0));
+        end pbool;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* print command */
+printcmd: procedure;
+
+        call printx(.set$to);
+        cmd(12)=0;
+        call printx(.cmd(1));
+        end printcmd;
+
+
+/*******************************************************
+
+              F I L E   A T T R I B U T E S
+
+********************************************************/
+
+
+
+                 /* print attribute set */
+printatt: procedure;
+
+
+    /* test if attribute fcbv(i) is on */
+    attribute: procedure(i) byte;
+       declare i byte;
+
+       if rol(fcbv(i),1) then
+          return true;
+       return false;
+       end attribute;
+
+
+    /* print character c if attribute(b) is true */
+    prnt$attrib: procedure(b,c);
+       declare (b,c) byte;
+
+       if attribute(b) then
+          call printchar(c);
+       end prnt$attrib;
+
+    /* display attributes: sys,ro,a,f1-f4 */
+          
+    call printx(.set$to);
+    if attribute(infile) then 
+        call printx(.('system (SYS)',0));
+    else
+        call printx(.('directory (DIR)',0));
+    call printx(.(', ',0));
+    if attribute(rofile) then do;
+        call printx(.read$only);
+        call printx(.ro);
+        end;
+    else
+        call printx(.read$write);
+
+    call printchar(tab);
+    call prnt$attrib(archiv,'A');
+    call prnt$attrib(attrb1,'1');
+    call prnt$attrib(attrb2,'2');
+    call prnt$attrib(attrb3,'3');
+    call prnt$attrib(attrb4,'4');
+    end print$att;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* read current file attributes */
+rd$attributes: procedure;
+
+    if scase = -1 then
+        if not wild then do;
+            call setdma(.dirbuf);
+            call set$up$file(search$first(.fcb));
+            end;
+    end rd$attributes;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                  /* set up file attributes */
+set$attributes: procedure;
+
+/*------------------------------------------------------------
+
+scase ranges from 0 - 13 : 
+
+0 - RW   3 - SYS       6 - F2 (on)  9 - not Archived 
+1 - RO   4 - ARCHIVED  7 - F3 (on) 10 - F1 (off) 12 - F3 (off)
+2 - DIR  5 - F1 (on)   8 - F4 (on) 11 - F2 (off) 13 - F4 (off) 
+
+-------------------------------------------------------------*/
+
+    call rd$attributes;
+    if (scase := match(.attributes,8)) > 3 then do;
+        call parse$value;
+        if not bool then 
+            scase = scase + 5;
+        end;
+    if attr$value(scase) then
+        fcbv(attr$byte(scase)) = fcbv(attr$byte(scase)) or 80h;
+    else
+        fcbv(attr$byte(scase)) = fcbv(attr$byte(scase)) and 7fh;
+
+    end set$attributes;
+
+
+
+/*******************************************************
+
+             D R I V E   A T T R I B U T E S
+
+********************************************************/
+
+
+
+
+
+                 /* set drive attributes */
+setdrvstatus: procedure;
+        dcl code byte;
+
+    /* set the drive */
+    if (scase:=match(.attributes,1)) then
+        code = writeprot;                   /* RO */
+    else
+        code = reset$drv(cdisk);            /* RW */
+    
+        /* display */
+    if code <> 0ffh then do;
+        call print(.('Drive ',0));
+        call printdrv;
+        call printb;
+        call printx(.set$to);
+        if scase then do;
+            call printx(.read$only);
+            call printx(.ro);
+            end;
+        else
+            call printx(.read$write);
+        end;
+    else
+        call print(.failed);
+    scase = -1;
+    end setdrvstatus;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* set default password */
+defaultpass: procedure;
+
+        call fill(.cmd(1),' ',8);
+        ibp = parse;             /* get password */
+        call mon1(106,.cmd(1));  /* set default password */
+        call print(.('Default Password ',0));
+        call printcmd;
+        end defaultpass;
+
+
+/*******************************************************
+
+             L A B E L   A T T R I B U T E S
+
+********************************************************/
+
+
+                 /* read the directory label before
+                    writing the label to preserve the
+                    name, type, and stamps */
+readlabel: procedure;
+    dcl (mode, dcnt) byte;
+        
+
+readlbl: proc;
+    dcl d byte data('?');
+    
+    call setdma(.dirbuf);
+    dcnt = search$first(.d);
+        do while dcnt <> 0ffh;
+        if dirbuf(ror(dcnt,3) and 110$0000b)=20H then
+            return;
+        dcnt = search$next;
+        end;
+
+    call print(.('lbl err',0));
+    call terminate;
+    end readlbl;
+
+    if lblcmd then
+        return;  
+    mode = getlbl(cdisk);
+    password = false;
+    if mode > 0 then do;
+        call readlbl;
+        fcbp = shl(dcnt,5) + .dirbuf;
+        fext = fext and 11110000b;      /* turn off set passwd */
+        if fcbv(16) <> ' ' then
+            if fcbv(16) <> 0 then
+                password = true;
+        end;
+    else do;
+        fcbp = .fcb;
+        call copy(.label$name,.fcb(1),length(label$name));
+        end;
+    if password then
+        call getpasswd;
+    lblcmd = true;
+    end readlabel;
+
+
+/*******************************************************
+
+             X F C B     A T T R I B U T E S
+
+********************************************************/
+
+
+                 /* read xfcb into xfcb buffer */
+set$up$xfcb: procedure;
+	
+        if not xfcbcmd then do;
+            call copy(.fcbv,.xfcb,12);
+            password,xfcbmode = 0;
+            call readxfcb(.xfcb);        /* read xfcb */
+            if xfcbmode <> 0 then
+                password = true;
+            xfcbcmd = true;
+            end;
+     /* else
+            already done */
+    end set$up$xfcb;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* no directory label exists */
+no$label: procedure(msg);
+    declare msg addr;
+
+    call crlf;
+    call print(.error$msg);
+    call printx(.(' First SET ',0));
+    call printdrv;
+    call printx(msg);
+    call terminate;
+    end no$label;
+
+
+/*******************************************************
+
+         PASSWORD  AND  PASSWORD  MODE  ROUTINES
+
+********************************************************/
+
+
+                 /* set file or label password */
+set$password: procedure;
+    dcl (p,q) address;
+    dcl c based p byte;
+    dcl d based q byte;
+	
+        if fileref then do;
+            if getlbl(cdisk) = 0 then
+                call no$label(.set$prot);
+            call set$up$xfcb;                 /* read xfcb */
+            xfcbmode = xfcbmode or 1;         /* set passwd */
+            end;
+        else do;
+            call readlabel;
+            fext = fext or 1;
+            end;
+        p = (q:=parse$fn.buff$adr) - 1;
+        if c = ',' or d = ']' then            /* null password */
+            call fill(.passwd(8),' ',8);
+        else do;
+            ibp = parse;                      /* parse password */
+            call copy(.cmd(1),.passwd(8),8);  /* copy it to fcb */
+            password = true;
+            end;
+    end set$password;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* set file or drive protection mode */
+protect: procedure;
+    declare new$password byte;
+    
+    zeropass: proc;
+        xfcbmode = 1;
+        call fill(.passwd(8),' ',8);
+        password = false;
+        end zeropass;
+    
+    rmode: proc;
+        xfcbmode = 80h;
+        end rmode;
+
+    call parse$value;	          /* protection value */
+    if fileref then  do;
+        if getlbl(cdisk) = 0 then
+            call no$label(.set$prot);
+        call set$up$xfcb;
+        if xfcbmode then          /* lsb    */
+            new$password = true;  /* save   */
+        else
+            new$password = false;
+
+            do case match(.values,5);
+            call zeropass;         /* OFF    */
+            call rmode;            /* ON     */
+            call rmode;            /* READ   */
+            xfcbmode = 40h;        /* WRITE  */
+            xfcbmode = 20h;        /* DELETE */
+            call zeropass;         /* NONE   */
+            end;
+
+        if new$password then       /* restore */
+            xfcbmode = xfcbmode or 1;
+        end;
+    else do;
+        call readlabel;
+        if bool then
+            fext = fext or 80h;         /* turn on passwords */
+        else
+            fext = fext and 01111111b;  /* turn off passwords */
+        end;   
+    end protect;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* set file time stamping */
+time: procedure;
+
+    call set$up$xfcb;
+    if (getlbl(cdisk) and 0110$0000b) = 0 then 
+        call no$label(.('[access=on, update=on]',0));
+    time$opt = true;
+    end time;
+
+
+/*******************************************************
+
+                LABEL  ATTRIBUTE  ROUTINES
+
+********************************************************/
+
+
+                 /* gets the label option boolean value */
+getbool: procedure;
+
+    if fileref then 
+        call parse$error;
+    call readlabel;			/* get label name */
+    call parse$value;    		/* option value */
+    end getbool;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* sets the label name */
+lname: procedure;
+
+    call getbool;
+    call copy(.cmd(1),.fcbv(1),11);      /* copy label name */
+    end lname;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* set access time stamping */
+access: procedure;
+
+    call getbool;
+    if not bool then
+        fext = fext and 10111111b;       /* turn off access ts */
+    else do;
+        fext = fext or 40h;              /* turn on access ts */
+        fext = fext or 10h;              /* turn on make xfcb */
+        end;
+    end access;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* set update time stamping */
+update: procedure;
+
+    call getbool;
+    if not bool then
+        fext = fext and 11011111b;        /* turn off update ts */
+    else do;
+        fext = fext or 20h;               /* turn on update ts */
+        fext = fext or 10h;               /* turn on make xfcb */
+        end;
+    end update;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* set create time stamping */
+create: procedure;
+
+    call getbool;
+    if not bool then 
+        fext = fext or 40h;               /* turn on access ts */
+    else do;
+        fext = fext and 10111111b;        /* turn off access ts */
+        fext = fext or 10h;               /* turn on make xfcb */
+        end;
+    end create;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* set make xfcbs option */
+makestamp: procedure;
+
+    call getbool;
+    if not bool then
+        fext = fext and 11101111b;        /* turn off make xfcb */
+    else
+        fext = fext or 10h;               /* turn on make xfcb */
+    end makestamp;
+
+
+
+/*******************************************************
+
+           S H O W   L A B E L   &   X F C B 
+
+********************************************************/
+
+
+
+
+
+                 /* display the new password */
+show$passwd: procedure;
+
+    call printx(.('Password = ',0));
+    passwd(16) = 0;
+    call printx(.passwd(8));
+    end show$passwd;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+/* HEADER for showlbl procedure */
+
+dcl label1 (*) byte data (
+'Directory       Passwds  Make     Stamp    Stamp    Stamp',cr,lf,
+'Label           Reqd     XFCBs    Create   Access   Update',cr,lf,
+'--------------  -------  -------  -------  -------  -------',cr,lf,0);
+
+                 /* show the label options */
+showlbl: procedure;
+    declare (make,access) byte;
+
+    call print(.('Label for drive ',0));
+    call printdrv;
+    call crlf;
+    call print(.label1);
+    call printfn;
+
+    /* PASSWORDS REQUIRED */
+    if (fext and 80h) = 80h then
+        call printx(.on);
+    else
+        call printx(.off);
+
+    /* MAKE XFCBS */
+    if (make:=(fext and 10h) = 10h) then
+        call printx(.on);
+    else
+        call printx(.off);
+
+    /* STAMP CREATE */
+    access = (fext and 40h) = 40h;
+    if make and not access then 
+        call printx(.on);
+    else
+        call printx(.off);
+
+    /* STAMP ACCESS */
+    if access then
+        call printx(.on);
+    else
+        call printx(.off);
+
+    /* STAMP UPDATE */
+    if (fext and 20h) = 20h then
+        call printx(.on);
+    else
+        call printx(.off);
+
+    call crlf;
+    if fext then do;
+        call crlf;
+        call show$passwd;
+        end;
+    end showlbl;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* display xfcb attributes */
+show$xfcb: procedure;
+
+    if xfcbmode <> 0 then do;
+        if xfcbmode > 1 then 
+            if not password then do;
+                call printx(.error$msg);
+                call printx(.(' Assign a password to this file.',0));
+                return;        /* error condition */
+                end;
+        call printx(.('Protection = ',0));
+        if (xfcbmode and 80h) = 80h then 
+            call printx(.readmode);
+        else if (xfcbmode and 40h) = 40h then 
+            call printx(.writemode);
+        else if (xfcbmode and 20h) = 20h then 
+            call printx(.deletemode);
+        else if (not xfcbmode) or (passwd(8) = ' ') then
+            call printx(.nopasswd);
+        else
+            call printx(.readmode);
+        if time$opt then
+            call printx(.comma);
+        end;
+    if time$opt then    
+        call printx(.time$stamp);
+    if xfcbmode then do;                /* lsb on */
+        call printx(.comma);
+        call show$passwd;
+        end;
+    end show$xfcb;
+
+
+/*******************************************************
+
+        WRITE  XFCB, LABEL  AND  FILE  ATTRIBUTES
+
+********************************************************/
+
+
+
+
+
+                 /* display the file or xfcb */
+put$file: procedure;
+
+    call crlf;
+    call printfn;
+    call printb;
+    call printb;
+    end put$file;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* write file attributes */
+put$attributes: procedure;
+	
+    error$code = setind(fcbp);
+    if low(error$code) = 0ffh then 
+        if high(error$code) <> 0 then do;
+            call put$file;
+            call bdos$error;
+            if high(error$code) = 7 then do;
+                call crlf;
+                call getpasswd;
+                call crlf;
+                error$code = setind(fcbp);
+                if high(error$code) <> 0 then do;
+                    call put$file;
+                    call bdos$error;
+                    end;
+                end;
+            end;
+        else
+            call printx(.not$found);
+    if low(error$code) <> 0ffh then
+        if fext <= extmsk then do;
+            call put$file;
+            call print$att;
+            end;
+    scase = -1;
+    end put$attributes;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* write new label */
+write$label: procedure;
+    err: proc;
+        call print(.dirlabel);
+        call bdos$error;
+        end err;
+
+    error$code = wrlbl(fcbp);
+    if low(error$code) = 0ffh then 
+        if high(error$code) <> 0 then do;
+            call err;
+            if high(error$code) = 7 then do;
+                call crlf;
+                call getpasswd;
+                error$code = wrlbl(fcbp);
+                if high(error$code) <> 0 then do;
+                    call err;
+                    call terminate;
+                    end;
+                call crlf;
+                end;
+            end;
+        else do;
+            call print(.failed);
+            call terminate;
+            end;
+
+    /* successful */
+    call showlbl;   
+    lblcmd = false;
+    end write$label;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* write out new xfcb */
+write$xfcb: procedure;
+	
+    call put$file;
+    error$code = wrxfcb(.xfcb);
+    if low(error$code) = 0ffh then 
+        if high(error$code) <> 0 then do;
+            call bdos$error;
+            if high(error$code) = 7 then do;
+                call crlf;
+                call getpasswd;
+                call crlf;
+                call put$file;
+                error$code = wrxfcb(.xfcb);
+                if high(error$code) <> 0 then 
+                    call bdos$error;
+                end;
+            end;
+        else do;
+            call printx(.not$found);
+            call printx(.no$space);
+            end;
+    if low(error$code) <> 0ffh then 
+        call show$xfcb;
+    xfcbcmd = false;
+    end write$xfcb;
+
+
+
+
+/*******************************************************
+
+           C O M M A N D   P R O C E S S I N G
+
+********************************************************/
+
+
+
+                 /* select the disk specified in cmd line */
+setdisk: procedure;
+    if cmd(0) <> 0 then do;
+        cdisk = cmd(0)-1;
+        call select(cdisk);
+        call set$dpb;
+        end;
+    end setdisk;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* find the next file matching the wildcard */
+getfile: procedure byte;
+    declare
+        dir$index byte;
+
+    call setdma(.dirbuf);
+    if wild then do;
+        pd.dcnt = sav$dcnt;
+        pd.searchl = sav$searchl;
+        pd.searcha = sav$searcha;
+        dir$index = search$next;
+        end;
+    else 
+        dir$index = search$first(.fcb);
+    if dir$index <> 0ffh then do;
+        call set$up$file(dir$index);
+        return true;
+        end;
+    /* else */
+        return false;
+    end getfile;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* test if the file is a wildcard */
+wildcard: procedure byte;
+    declare
+        i byte;
+
+        do i=1 to fnam;
+        if fcb(i) = '?' then
+            return true;
+        end;
+    return false;
+    end wildcard;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* set up the next file or drive reference */
+setup$fcb: procedure;
+
+    call setdisk;
+    call copy(.cmd,.fcb,12);       /* name */
+    call copy(.cmd(16),.passwd,8); /* password */
+    time$opt, option$found = false;
+    if fcb(1) <> ' ' or fcb(ftyp) <> ' ' then do;
+        fileref = true;
+        if wildcard then 
+            if getfile then do;
+                wild = true;
+                opt$adr = parse$fn.buff$adr;
+                end;
+            else do;
+                call print(.not$found);
+                call terminate;
+                end;
+        else
+            fcbp = .fcb;
+        end;
+    else 
+        fileref = false;
+    end setup$fcb;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* parse next option */
+parse$option: procedure;
+
+    if cmd(1) = 'A' then do;                 /* A */
+        if cmd(2) = 'C' then
+            call access;
+        else if fileref then
+            call set$attributes;
+        else
+            call parse$error;
+        end;
+    else if cmd(1) = 'C' then                /* C */
+        call create;
+    else if cmd(1) = 'D' then do;            /* D */
+        if fileref then
+            call set$attributes;
+        else if cmd(2) = 'E' then 
+            call defaultpass;
+        else 
+            call parse$error;
+        end;
+    else if cmd(1) = 'F' then                /* F */
+        call set$attributes;
+    else if cmd(1) = 'H' then                /* H */
+        call help;
+    else if cmd(1) = 'M' then                /* M */
+        call makestamp;
+    else if cmd(1) = 'N' then                /* N */
+        call lname;
+    else if cmd(1) = 'P' then do;            /* P */
+        if cmd(2) = 'R' then
+            call protect;
+        else if cmd(2) = 'A' then
+            call set$password;
+        else
+            call parse$error;
+        end;
+    else if cmd(1) = 'R' then do;            /* R */
+        if fileref then 
+            call set$attributes;
+        else
+            call setdrvstatus;
+        end;
+    else if cmd(1) = 'S' and fileref then    /* S */
+        call set$attributes;
+    else if cmd(1) = 'T' and fileref then    /* T */
+        call time;
+    else if cmd(1) = 'U' then                /* U */
+        call update;
+    else if cmd(1) = 'V' then                /* V */
+        call print(.version);
+    else if cmd(1) = 'X' and fileref then    /* X */
+        call time;
+    else 
+        call parse$error;
+    end parse$option;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* check for more to parse */
+is$there$more: proc;
+
+    if ibp = 0 then do;
+        if not option$found then do;
+            call printx(.version);
+            call print(.error$msg);
+            call printx(.('Parameter Required, try SET [HELP]',0));
+            call terminate;
+            end;
+        if not wild then 
+            more = false;
+        end;
+    end is$there$more;
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+                 /* check for SET HELP */
+                 /* REMOVED FOR CONSISTANCY WITH SDIR 
+help$check: proc;
+    declare i byte;
+
+        do i=1 to 11;
+        if fcb(i) <> cmd(i) then 
+            return;
+        end;
+    call help;
+    call terminate;
+    end help$check;
+                 */
+
+/*******************************************************
+
+                M A I N  P R O G R A M
+
+********************************************************/
+
+
+
+declare 
+        i              byte   initial (1),
+        last$dseg$byte byte   initial (0);
+
+
+start:
+/* process request */
+    ver = get$version;
+    if low(ver) < cpmversion or (high(ver) and 0fh) <> mpmproduct then
+        call print(.('Requires MP/M 2.0',0));
+    else
+        do;
+/*        call help$check;  */
+            /* scan for global option */
+            do while buff(i)=' ';
+            i = i + 1;
+            end;
+        if buff(i) = '[' then do;
+            option, optdel, option$found = true;
+            parse$fn.buff$adr = .buff(i+1);
+            end;
+        else
+            parse$fn.buff$adr = .buff(1);
+        last$buff$adr = .buff(1);       /* used by perror routine */
+        parse$fn.fcb$adr = .cmd;
+        user$code = getuser;
+        call getpd;			/* get process descriptor */
+        call set$dpb;                   /* get disk parameter blk */
+        cdisk=cselect;			/* get current disk */
+        ibp = parse;
+            do while more;
+            call is$there$more;
+            if option then
+                call parse$option;
+            else if more then
+                call setup$fcb;         /* file or drive reference */
+
+            if optdel then
+                option, option$found = true;
+            else do;
+                option = false;
+                call return$errors(0FFh);  /* bdos return errors */
+                if lblcmd then             /* label options */
+                    call write$label;
+                if scase <> -1 then        /* file attributes */
+                    call put$attributes;
+                if xfcbcmd then            /* xfcb attributes */
+                    call write$xfcb;
+                call return$errors(0);  
+                if wild then 
+                    if getfile then do;
+                        parse$fn.buff$adr = opt$adr;
+                        option, optdel = true;
+                        end;
+                    else
+                        wild = false;
+                end;
+            call is$there$more;
+            ibp = parse;
+            end;
+        end;
+    call terminate;
+    end;
+
+
+
