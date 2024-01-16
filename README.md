@@ -1,6 +1,6 @@
 # MPM II v 2.1
 
-## MPM II Operating System for Z180 RCBus
+## MPM II Operating System for RCBus
 
 Version 1.5  
 29-12-2023
@@ -8,13 +8,13 @@ Version 1.5
 Tadeusz Pycio
 
 Requirements:
-Z180 system running [SCM v1.3](https://smallcomputercentral.wordpress.com/small-computer-monitor/) (earlier versions require memory mapping to be changed from 0xF0000 to 0x80000), 512kB RAM, CF memory module at address 0x10, 128MB CF card and running CP/M 2.2 under this configuration.
+System running [SCM v1.3](https://smallcomputercentral.wordpress.com/small-computer-monitor/) (earlier versions require memory mapping to be changed from 0xF0000 to 0x80000), 512kB RAM, CF memory module at address 0x10, 128MB CF card and running CP/M 2.2 under this configuration.
 
 ## System design
 
 1. MP/M kernel loader (/Loader)
 
-2. XIOS customized for your hardware (/Xios)
+2. XIOS customized for your hardware and CPU (/Xios_Z180, /Xios_Z80)
 
 3. Building kernel of MP/M operating system (/Kernel)
 
