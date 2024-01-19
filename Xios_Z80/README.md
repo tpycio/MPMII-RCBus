@@ -1,6 +1,6 @@
 # XIOS building
 
-Folder contains the XIOS sources used to build BNKXIOS.SPR for Z180.
+Folder contains the XIOS sources used to build BNKXIOS.SPR for Z80.
 XIOS requires the appropriate switches to be set up depending on the target hardware configuration
 
 - RC2014 - true|false (RC2014 | Zilog SIO address scheme)
