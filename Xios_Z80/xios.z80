@@ -16,9 +16,9 @@
 ;  Revision History:                                                           
 ;  Rev    Date         Author                Comments                          
 ;  0.80   22-09-2021   Tadeusz Pycio         Created                           
-;  0.90   19-01-2023   Tadeusz Pycio         Z80 MMU2                          
 ;  0.91   20-07-2023   Tadeusz Pycio         SIO Interrupt handler             
 ;  1.00   30-12-2023   Tadeusz Pycio         Commonbase address offset         
+;  1.02   19-01-2023   Tadeusz Pycio         Add support MMU 74HCT612          
 ;******************************************************************************
 
 false       equ   0
@@ -26,7 +26,7 @@ true        equ   not false
 
 quecon      equ   true              ; true if using queued consoles
 rc2014      equ   false             ; RC2014 | Zilog SIO address scheme
-mem512      equ   false             ; RC2014 memory module 512/512 | Z80-512K
+mmu612      equ   false             ; MMU 74612| MMU Z2
 
 tpabuf      equ   80h               ; Default I/O buffer and command line storage
 cbase       equ   0C0h              ; CommonBase address
@@ -42,9 +42,11 @@ CR          equ   0Dh               ; Carriage Return
 
 ; Hardware definitions
 IDE         EQU   010h              ; address interface IDE CF
+MMU         equ   078h              ; base address MMU Z2
 SIO         equ   080h              ; base address SIO
 CTC         equ   088h              ; base address CTC
-      if    rc2014
+
+      if  rc2014
 ; Z80 SIO addresses used by RC2014 official module
 SIOA_D      equ   SIO+1             ; Serial port A Data
 SIOA_C      equ   SIO               ; Serial port A Control
@@ -94,18 +96,6 @@ CF_NOCACHE  equ   082h
 CF_RD_SEC   equ   020h
 CF_WR_SEC   equ   030h
 CF_SET_FEAT equ   0EFh
-; MMU Z2
-         if  mem512
-MMU0        equ   070h              ; 0x0000-0x3FFF
-MMU1        equ   071h              ; 0x4000-0x7FFF
-MMU2        equ   072h              ; 0x8000-0xBFFF
-MMU3        equ   073h              ; 0xC000-0xFFFF
-         else
-MMU0        equ   078h              ; 0x0000-0x3FFF
-MMU1        equ   079h              ; 0x4000-0x7FFF
-MMU2        equ   07Ah              ; 0x8000-0xBFFF
-MMU3        equ   07Bh              ; 0xC000-0xFFFF
-         endif
 
 ; -----------------------------------------------------------------------------
             cseg
@@ -975,14 +965,26 @@ selmemory:  inc   bc                ; size   1 byte,
 selbank:    and   7                 ; bank number
             rlca
             rlca
-            or    20h               ; set A19
-            out   (MMU0),a          ; 0x0000-0x3FFF
-            inc   a
-            out   (MMU1),a          ; 0x4000-0x7FFF
-            inc   a
-            out   (MMU2),a          ; 0x8000-0xBFFF
+      if  mmu612
+            rlca
+            rlca
+            or    8Ch               ; bank or base addr + MMU page
+            ld    c,7Ch             ; addr MMU 74612 + 0Ch
+            ld    b,0Dh             ; number of changed registers
+mmuloop:    out   (c),a
+            dec   c
+            dec   a
+            djnz  mmuloop
             ret
-
+      else
+            or    20h               ; set A19
+            out   (MMU),a           ; 0x0000-0x3FFF
+            inc   a
+            out   (MMU+1),a         ; 0x4000-0x7FFF
+            inc   a
+            out   (MMU+2),a         ; 0x8000-0xBFFF
+            ret
+      endif
 ;----------------------------------------------------------------
 startclock: ld    a,0FFh            ; will cause flag #1 to be set
             ld    (tickn),a         ; at each system time unit tick
@@ -1141,19 +1143,19 @@ dirbuf:     ds    128               ;scratch directory area
 sysorg      equ   0000h
 
 Welcome:    db    CR,LF,"RCBus Banked XIOS for "
-         if  mem512
-            db    "Z80 Z2 MMU"
-         else
-            db    "Z80-512k"
-         endif
-            db    CR,LF,"  v1.01 (C) by T.Pycio 2024",CR,0
+      if  mmu612
+            db    "Z80 MMU 612"
+      else
+            db    "Z80 MMU Z2"
+      endif
+            db    CR,LF,"  v1.02 (C) by T.Pycio 2024",CR,0
 SIOtbl:     db    00h, 00011000b    ; WR0 - reset channel
             db    04h, 11000100b    ; WR4 - set clock/64, 1 stop bit, no parity (7372800/64=115200)
-        if  quecon
+      if  quecon
             db    01h, 00011000b    ; WR1 - interrupt on all RX characters
-        else
+      else
             db    01h, 00000000b    ; WR1 - no interrupts on all Rx characters
-        endif
+      endif
             db    03h, 11000001b    ; WR3 - set Rx enable, 8 bits data
             db    05h, 01101000b    ; WR5 - set Tx enable, 8 bits data, DTR & RTS off
             db    02h, 00h          ; set interrupt vector (channel B only)
@@ -1220,7 +1222,7 @@ inib2:      push  af
             ld    c, SIOB_C
             otir
 
-        if  quecon
+      if  quecon
             ld    hl,itbl+8
             ld    a,02h             ; WR2
             out   (SIOB_C),a
@@ -1229,7 +1231,7 @@ inib2:      push  af
             ld    c,create          ;create process
             ld    de,c0inpd         ;point to process discriptor
             call  xdos
-        endif
+      endif
 
             ld    hl,Welcome
             push  de
