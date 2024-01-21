@@ -968,9 +968,8 @@ selbank:    and   7                 ; bank number
       if  mmu612
             rlca
             rlca
-            or    8Ch               ; bank or base addr + MMU page
-            ld    c,7Ch             ; addr MMU 74612 + 0Ch
-            ld    b,0Dh             ; number of changed registers
+            or    8Bh               ; bank or base addr + MMU page
+            ld    bc,0C7Bh          ; nr chg reg ; addr MMU 74612+0Bh
 mmuloop:    out   (c),a
             dec   c
             dec   a
