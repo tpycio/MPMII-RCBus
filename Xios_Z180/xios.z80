@@ -951,8 +951,6 @@ serial0int: di
             ld    (savhl),hl
             push  de
             push  bc
-            push  ix
-            push  iy
             ld    a,0FFh
             ld    (preemp),a
 
@@ -968,8 +966,6 @@ serial1int: di
             ld    (savhl),hl
             push  de
             push  bc
-            push  ix
-            push  iy
             ld    a,0FFh
             ld    (preemp),a
             in0   a,(RDR1)
@@ -992,8 +988,6 @@ timerint:   di
             ld    (savhl),hl
             push  de
             push  bc
-            push  ix
-            push  iy
             ld    a,0FFh
             ld    (preemp),a
             in0   a,(TCR)
@@ -1016,8 +1010,6 @@ notickn:    ld    hl,cnt1sec
 
 intdone:    xor   a
             ld    (preemp),a        ; clear preempted flag
-            pop   iy
-            pop   ix
             pop   bc
             pop   de
             ld    sp,(savsp)        ; restore stack ptr
@@ -1088,7 +1080,7 @@ dirbuf:     ds    128               ;scratch directory area
 ; -----------------------------------------------------------------------------
             org   temp
 sysorg      equ   0000h
-Welcome:    db    CR,LF,"Banked XIOS v1.5 for RCBus by T.Pycio 2023",CR,0
+Welcome:    db    CR,LF,"Banked XIOS v1.51 for RCBus by T.Pycio 2024",CR,0
 
 ; System Initialization. The following registers are input parameters:
 ; <C>   MP/M debugger restart #
@@ -1178,12 +1170,6 @@ inib2:      push  af
             ld    hl,Welcome
             call  PutMsg            ; print welcome banner
 
-      if  quecon
-            ld    c,create          ; create process
-            ld    de,c0inpd         ; point to process descriptor
-            call  xdos
-      endif
-
 ; init the Z180 int table (must begin on a 32-byte boundary)
             ld    hl,itbl
             ld    a,l
@@ -1194,6 +1180,10 @@ inib2:      push  af
             ld    a,08h             ; enable ASCI interrupts
             out0  (STAT0),a
             out0  (STAT1),a
+
+            ld    c,create          ; create process
+            ld    de,c0inpd         ; point to process descriptor
+            call  xdos
       endif
             ld    a,11h             ; turn ints on and enable downcounting
             out0  (TCR),a

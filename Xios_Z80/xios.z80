@@ -1010,8 +1010,6 @@ serialint:  di
             ld    (savhl),hl
             push  de
             push  bc
-            push  ix
-            push  iy
             ld    a,0FFh
             ld    (preemp),a
             ; Check if there is a char in channel A
@@ -1047,8 +1045,6 @@ timerint:   di
             ld    (savhl),hl
             push  de
             push  bc
-            push  ix
-            push  iy
             ld    a,0FFh
             ld    (preemp),a
 
@@ -1069,8 +1065,6 @@ notickn:    ld    hl,cnt1sec
 
 intdone:    xor   a
             ld    (preemp),a        ; clear preempted flag
-            pop   iy
-            pop   ix
             pop   bc
             pop   de
             ld    sp,(savsp)        ; restore stack ptr
@@ -1147,7 +1141,7 @@ Welcome:    db    CR,LF,"RCBus Banked XIOS for "
       else
             db    "Z80 MMU Z2"
       endif
-            db    CR,LF,"  v1.02 (C) by T.Pycio 2024",CR,0
+            db    CR,LF,"  v1.03 (C) by T.Pycio 2024",CR,0
 SIOtbl:     db    00h, 00011000b    ; WR0 - reset channel
             db    04h, 11000100b    ; WR4 - set clock/64, 1 stop bit, no parity (7372800/64=115200)
       if  quecon
@@ -1221,17 +1215,6 @@ inib2:      push  af
             ld    c, SIOB_C
             otir
 
-      if  quecon
-            ld    hl,itbl+8
-            ld    a,02h             ; WR2
-            out   (SIOB_C),a
-            ld    a,l               ; Interrupt vector address
-            out   (SIOB_C),a
-            ld    c,create          ;create process
-            ld    de,c0inpd         ;point to process discriptor
-            call  xdos
-      endif
-
             ld    hl,Welcome
             push  de
             call  PutMsg            ; Print welcome banner
@@ -1247,6 +1230,17 @@ inib2:      push  af
             out   (CTC+2),a         ; Write channel 2's control register
             ld    a,64              ; 3200Hz/64 = 50Hz
             out   (CTC+2),a         ; Write channel 2's time base
+
+      if  quecon
+            ld    hl,itbl+8
+            ld    a,02h             ; WR2
+            out   (SIOB_C),a
+            ld    a,l               ; Interrupt vector address
+            out   (SIOB_C),a
+            ld    c,create          ;create process
+            ld    de,c0inpd         ;point to process discriptor
+            call  xdos
+      endif
 
 ; init intettupt
             ld    hl,itbl
