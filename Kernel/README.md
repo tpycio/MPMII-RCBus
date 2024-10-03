@@ -34,5 +34,5 @@ When generating MPM.SYS using GENSYS.COM, specify:
     Total open files/system (#32) ?
     Bank switched memory (Y) ?
     Number of user memory segments (#3) ? 7
-    Common memory base page (C0) ? B0
+    Common memory base page (C0) ? C0
     Dayfile logging at console (Y) ? n
