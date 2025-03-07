@@ -8,7 +8,7 @@ Version 1.5  (Z180), 1.02 (Z80)
 Tadeusz Pycio
 
 Requirements:
-System running [SCM v1.3](https://smallcomputercentral.wordpress.com/small-computer-monitor/), (for Z80 with MMU Z2 SCM ROM can be found in this repository) 512kB RAM, CF memory module at address 0x10, 128MB CF card and running CP/M 2.2 in this configuration.
+System running [SCM v1.3](https://smallcomputercentral.wordpress.com/small-computer-monitor/), (for Z80 with MMU Z2 SCM ROM can be found in this repository) 512kB RAM, CF memory module at address 0x10, 128MB CF card, CTC module configured to generate interrupts every 20ms and running CP/M 2.2 in this configuration.
 
 ## System design
 
